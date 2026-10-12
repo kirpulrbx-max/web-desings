@@ -89,6 +89,7 @@ export default function App() {
   const [merchantForm, setMerchantForm] = useState({ email: '', password: '' });
   const [merchantAuthError, setMerchantAuthError] = useState('');
   const [catalogFilter, setCatalogFilter] = useState('Todos');
+  const [qrSvgElement, setQrSvgElement] = useState<SVGSVGElement | null>(null);
   const [newBusiness, setNewBusiness] = useState<NewBusinessForm>({
     name: '',
     slug: '',
@@ -155,6 +156,16 @@ export default function App() {
       revenue: businessProducts.reduce((sum, product) => sum + product.price, 0),
     };
   }, [products, selectedBusiness.id]);
+
+  useEffect(() => {
+    const requestedSlug = decodeURIComponent(window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/)?.[1] ?? '');
+    if (!requestedSlug) return;
+    const matchingBusiness = businesses.find((business) => business.slug === requestedSlug);
+    if (matchingBusiness) {
+      setSelectedBusinessId(matchingBusiness.id);
+      setActivePanel('catalog');
+    }
+  }, [businesses]);
 
   const updateCart = (productId: string, delta: number) => {
     setCart((current) => {
@@ -326,7 +337,31 @@ export default function App() {
     window.open(whatsappLink, '_blank', 'noopener,noreferrer');
   };
 
-  const publicUrl = `https://catalogofacil.app/tienda/${selectedBusiness.slug}`;
+  const downloadQrCode = () => {
+    if (!qrSvgElement) return;
+    const svg = new XMLSerializer().serializeToString(qrSvgElement);
+    const image = new Image();
+    const imageUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const context = canvas.getContext('2d');
+      if (!context) return URL.revokeObjectURL(imageUrl);
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(imageUrl);
+      const link = document.createElement('a');
+      link.download = `qr-${selectedBusiness.slug}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    };
+    image.onerror = () => URL.revokeObjectURL(imageUrl);
+    image.src = imageUrl;
+  };
+
+  const publicUrl = `${window.location.origin}/tienda/${encodeURIComponent(selectedBusiness.slug)}`;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 antialiased">
@@ -702,10 +737,10 @@ export default function App() {
                 <h3 className="mt-2 text-3xl font-semibold text-slate-900">{selectedBusiness.name}</h3>
               </div>
               <div className="flex flex-wrap gap-3">
-                <button className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
+                <button className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700" onClick={() => window.open(publicUrl, '_blank', 'noopener,noreferrer')}>
                   Ver enlace público
                 </button>
-                <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+                <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white" onClick={() => document.getElementById('business-qr')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
                   Generar QR
                 </button>
               </div>
@@ -755,7 +790,7 @@ export default function App() {
             </div>
 
             <div className="space-y-6">
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div id="business-qr" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                     <QrCode className="h-5 w-5" />
@@ -765,16 +800,25 @@ export default function App() {
                     <h3 className="text-xl font-semibold text-slate-900">Catálogo público</h3>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mx-auto flex max-w-[180px] justify-center rounded-2xl bg-white p-3 shadow-sm">
-                    <QRCodeSVG value={publicUrl} size={150} includeMargin />
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="mx-auto flex max-w-[240px] justify-center bg-white p-3">
+                    <QRCodeSVG
+                      ref={setQrSvgElement}
+                      value={publicUrl}
+                      size={220}
+                      level="H"
+                      marginSize={4}
+                      bgColor="#ffffff"
+                      fgColor="#111827"
+                      title={`Catálogo de ${selectedBusiness.name}`}
+                    />
                   </div>
                 </div>
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="text-xs text-slate-500">{publicUrl}</p>
-                  <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <a className="break-all text-xs text-slate-600 underline decoration-slate-300 underline-offset-2" href={publicUrl} target="_blank" rel="noreferrer">{publicUrl}</a>
+                  <button className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700" onClick={downloadQrCode}>
                     <Download className="h-4 w-4" />
-                    Descargar PNG
+                    Descargar QR PNG
                   </button>
                 </div>
               </div>
