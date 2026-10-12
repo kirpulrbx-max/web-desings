@@ -15,6 +15,7 @@ import {
   Sparkles,
   Store,
   Truck,
+  X,
   Wallet,
   Zap,
 } from 'lucide-react';
@@ -100,6 +101,13 @@ const fromDatabaseStatus = (status: string): BusinessStatus => {
 
 const toDatabaseStatus = (status: BusinessStatus) => status.toLowerCase();
 
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('No se pudo leer la imagen.'));
+  reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+  reader.readAsDataURL(file);
+});
+
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>('home');
   const [businesses, setBusinesses] = useState<Business[]>(loadBusinesses);
@@ -119,6 +127,8 @@ export default function App() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [merchantProductFormOpen, setMerchantProductFormOpen] = useState(false);
   const [productForm, setProductForm] = useState<ProductForm>({ name: '', category: 'Panadería', price: '', description: '', image: '' });
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [productFeedback, setProductFeedback] = useState('');
   const [adminDataError, setAdminDataError] = useState('');
   const [requestedStoreUnavailable, setRequestedStoreUnavailable] = useState(false);
@@ -331,7 +341,26 @@ export default function App() {
   const resetProductForm = () => {
     setEditingProductId(null);
     setProductForm({ name: '', category: 'Panadería', price: '', description: '', image: '' });
+    setSelectedImageFile(null);
+    if (imagePreviewUrl.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl('');
     setMerchantProductFormOpen(false);
+  };
+
+  const handleProductImageSelection = (file?: File) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setAdminDataError('Usa una imagen JPG, PNG o WebP.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAdminDataError('La imagen debe pesar menos de 5 MB.');
+      return;
+    }
+    if (imagePreviewUrl.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl);
+    setSelectedImageFile(file);
+    setImagePreviewUrl(URL.createObjectURL(file));
+    setAdminDataError('');
   };
 
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
@@ -343,6 +372,28 @@ export default function App() {
     }
     const price = Number(productForm.price);
     if (!productForm.name.trim() || !productForm.category || !Number.isFinite(price) || price <= 0) return;
+    let imageUrl = productForm.image.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80';
+    if (selectedImageFile) {
+      if (isSupabaseConfigured) {
+        const client = supabase;
+        if (!client) return;
+        const safeFileName = selectedImageFile.name.replace(/[^a-zA-Z0-9.-]/g, '-');
+        const imagePath = `${selectedBusinessId}/${crypto.randomUUID()}-${safeFileName}`;
+        const { error: uploadError } = await client.storage.from('product-images').upload(imagePath, selectedImageFile, { upsert: true, contentType: selectedImageFile.type });
+        if (uploadError) {
+          setAdminDataError(uploadError.message);
+          return;
+        }
+        imageUrl = client.storage.from('product-images').getPublicUrl(imagePath).data.publicUrl;
+      } else {
+        try {
+          imageUrl = await readFileAsDataUrl(selectedImageFile);
+        } catch (error) {
+          setAdminDataError(error instanceof Error ? error.message : 'No se pudo leer la imagen.');
+          return;
+        }
+      }
+    }
     const product: Product = {
       id: editingProductId ?? `prod-${Date.now()}`,
       businessId: selectedBusinessId,
@@ -351,7 +402,7 @@ export default function App() {
       price,
       description: productForm.description.trim(),
       active: products.find((item) => item.id === editingProductId)?.active ?? true,
-      image: productForm.image.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80',
+      image: imageUrl,
     };
     if (isSupabaseConfigured) {
       const client = supabase;
@@ -417,6 +468,8 @@ export default function App() {
   const startProductEdit = (product: Product) => {
     setEditingProductId(product.id);
     setProductForm({ name: product.name, category: product.category, price: String(product.price), description: product.description, image: product.image });
+    setSelectedImageFile(null);
+    setImagePreviewUrl(product.image);
     setProductFeedback('');
     setMerchantProductFormOpen(true);
     document.getElementById('merchant-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1224,44 +1277,6 @@ export default function App() {
                     </div>
                   ))}
               </div>
-              {merchantProductFormOpen && (
-                <form id="merchant-product-form" className="mt-6 space-y-4 border-t border-slate-200 pt-5" onSubmit={saveProduct}>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{editingProductId ? 'Editar publicación' : 'Nueva publicación'}</p>
-                    <h4 className="mt-1 text-lg font-semibold text-slate-900">{editingProductId ? 'Actualizar producto' : 'Publicar un producto'}</h4>
-                  </div>
-                  <label className="block text-sm text-slate-700">
-                    <span className="mb-2 block font-medium">Nombre</span>
-                    <input required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} />
-                  </label>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block text-sm text-slate-700">
-                      <span className="mb-2 block font-medium">Categoría</span>
-                      <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
-                        {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
-                      </select>
-                    </label>
-                    <label className="block text-sm text-slate-700">
-                      <span className="mb-2 block font-medium">Precio (USD)</span>
-                      <input required type="number" min="0.01" step="0.01" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} />
-                    </label>
-                  </div>
-                  <label className="block text-sm text-slate-700">
-                    <span className="mb-2 block font-medium">Descripción</span>
-                    <textarea rows={3} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} />
-                  </label>
-                  <label className="block text-sm text-slate-700">
-                    <span className="mb-2 block font-medium">Imagen (URL)</span>
-                    <input type="url" placeholder="https://..." className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.image} onChange={(event) => setProductForm((current) => ({ ...current, image: event.target.value }))} />
-                  </label>
-                  {adminDataError && <p className="text-sm text-rose-700" role="alert">{adminDataError}</p>}
-                  {productFeedback && <p className="text-sm text-emerald-700" role="status">{productFeedback}</p>}
-                  <div className="flex flex-wrap gap-2">
-                    <button className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white" type="submit">{editingProductId ? 'Guardar cambios' : 'Publicar producto'}</button>
-                    <button className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700" type="button" onClick={resetProductForm}>Cancelar</button>
-                  </div>
-                </form>
-              )}
             </div>
 
             <div className="space-y-6">
@@ -1319,6 +1334,59 @@ export default function App() {
             </div>
           </section>
             </>
+          )}
+          {merchantProductFormOpen && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resetProductForm(); }}>
+              <form id="merchant-product-form" className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6" onSubmit={saveProduct}>
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">{editingProductId ? 'Editar publicación' : 'Nueva publicación'}</p>
+                    <h2 className="mt-1 text-xl font-semibold text-slate-900">{editingProductId ? 'Modificar producto' : 'Añadir producto'}</h2>
+                  </div>
+                  <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="Cerrar" onClick={resetProductForm}><X className="h-5 w-5" /></button>
+                </div>
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Nombre del producto
+                    <input autoFocus required className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} placeholder="Ej. Pan artesanal" />
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block text-sm font-medium text-slate-700">
+                      Categoría
+                      <select className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-600" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
+                        {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Precio (USD)
+                      <input required type="number" min="0.01" step="0.01" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-600" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} placeholder="0.00" />
+                    </label>
+                  </div>
+                  <div>
+                    <span className="mb-1.5 block text-sm font-medium text-slate-700">Foto del producto</span>
+                    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 hover:border-emerald-500 hover:bg-emerald-50">
+                      {imagePreviewUrl || productForm.image ? <img src={imagePreviewUrl || productForm.image} alt="Vista previa" className="h-16 w-16 rounded-md object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded-md bg-white text-slate-400"><ImageIcon className="h-6 w-6" /></span>}
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-slate-800">{selectedImageFile?.name ?? (imagePreviewUrl ? 'Cambiar foto' : 'Subir una foto')}</span>
+                        <span className="mt-1 block text-xs text-slate-500">JPG, PNG o WebP · máximo 5 MB</span>
+                      </span>
+                      <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleProductImageSelection(event.target.files?.[0])} />
+                    </label>
+                    {!selectedImageFile && <input type="url" className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs" placeholder="O pega la URL de una imagen" value={productForm.image} onChange={(event) => { setProductForm((current) => ({ ...current, image: event.target.value })); setImagePreviewUrl(''); }} />}
+                  </div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Descripción <span className="font-normal text-slate-400">(opcional)</span>
+                    <textarea rows={2} className="mt-1.5 w-full resize-y rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-600" value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} placeholder="Detalles del producto" />
+                  </label>
+                </div>
+                {adminDataError && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{adminDataError}</p>}
+                {productFeedback && <p className="mt-4 text-sm text-emerald-700" role="status">{productFeedback}</p>}
+                <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
+                  <button type="button" className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={resetProductForm}>Cancelar</button>
+                  <button type="submit" className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800">{editingProductId ? 'Guardar cambios' : 'Publicar producto'}</button>
+                </div>
+              </form>
+            </div>
           )}
         </main>
       )}

@@ -65,3 +65,66 @@ for all using (
 drop policy if exists "Comerciante ve su tienda" on public.businesses;
 create policy "Comerciante ve su tienda" on public.businesses
 for select using (owner_id = auth.uid());
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('product-images', 'product-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Imágenes de catálogo visibles públicamente" on storage.objects;
+create policy "Imágenes de catálogo visibles públicamente" on storage.objects
+for select using (bucket_id = 'product-images');
+
+drop policy if exists "Admin y dueño pueden subir imágenes de catálogo" on storage.objects;
+create policy "Admin y dueño pueden subir imágenes de catálogo" on storage.objects
+for insert to authenticated with check (
+  bucket_id = 'product-images'
+  and (
+    public.is_admin()
+    or exists (
+      select 1 from public.businesses b
+      where b.id::text = (storage.foldername(name))[1]
+        and b.owner_id = auth.uid()
+    )
+  )
+);
+
+drop policy if exists "Admin y dueño pueden actualizar imágenes de catálogo" on storage.objects;
+create policy "Admin y dueño pueden actualizar imágenes de catálogo" on storage.objects
+for update to authenticated using (
+  bucket_id = 'product-images'
+  and (
+    public.is_admin()
+    or exists (
+      select 1 from public.businesses b
+      where b.id::text = (storage.foldername(name))[1]
+        and b.owner_id = auth.uid()
+    )
+  )
+) with check (
+  bucket_id = 'product-images'
+  and (
+    public.is_admin()
+    or exists (
+      select 1 from public.businesses b
+      where b.id::text = (storage.foldername(name))[1]
+        and b.owner_id = auth.uid()
+    )
+  )
+);
+
+drop policy if exists "Admin y dueño pueden borrar imágenes de catálogo" on storage.objects;
+create policy "Admin y dueño pueden borrar imágenes de catálogo" on storage.objects
+for delete to authenticated using (
+  bucket_id = 'product-images'
+  and (
+    public.is_admin()
+    or exists (
+      select 1 from public.businesses b
+      where b.id::text = (storage.foldername(name))[1]
+        and b.owner_id = auth.uid()
+    )
+  )
+);
