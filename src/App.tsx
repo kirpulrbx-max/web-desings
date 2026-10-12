@@ -172,6 +172,14 @@ export default function App() {
     });
   }, [catalogFilter, products, selectedBusiness.id]);
 
+  const businessCategories = useMemo(() => {
+    const productCategories = products
+      .filter((product) => product.businessId === selectedBusiness.id)
+      .map((product) => product.category.trim())
+      .filter(Boolean);
+    return ['Todos', ...new Set(productCategories)];
+  }, [products, selectedBusiness.id]);
+
   const cartItems = useMemo(() => {
     return Object.entries(cart)
       .map(([productId, quantity]) => {
@@ -372,7 +380,8 @@ export default function App() {
       return;
     }
     const price = Number(productForm.price);
-    if (!productForm.name.trim() || !productForm.category || !Number.isFinite(price) || price <= 0) return;
+    const category = productForm.category.trim();
+    if (!productForm.name.trim() || !category || !Number.isFinite(price) || price <= 0) return;
     let imageUrl = productForm.image.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80';
     if (selectedImageFile) {
       if (isSupabaseConfigured) {
@@ -399,7 +408,7 @@ export default function App() {
       id: editingProductId ?? `prod-${Date.now()}`,
       businessId: selectedBusinessId,
       name: productForm.name.trim(),
-      category: productForm.category,
+      category,
       price,
       description: productForm.description.trim(),
       active: products.find((item) => item.id === editingProductId)?.active ?? true,
@@ -1107,9 +1116,7 @@ export default function App() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="block text-sm text-slate-700">
                         <span className="mb-2 block font-medium">Categoría</span>
-                        <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
-                          {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
-                        </select>
+                        <input required maxLength={60} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))} placeholder="Escribe una categoría" />
                       </label>
                       <label className="block text-sm text-slate-700">
                         <span className="mb-2 block font-medium">Precio (USD)</span>
@@ -1354,9 +1361,7 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-sm font-medium text-slate-700">
                       Categoría
-                      <select className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-600" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
-                        {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
-                      </select>
+                      <input required maxLength={60} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-600" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))} placeholder="Escribe una categoría" />
                     </label>
                     <label className="block text-sm font-medium text-slate-700">
                       Precio (USD)
@@ -1420,7 +1425,7 @@ export default function App() {
             </div>
 
             <div className="mt-6 flex flex-wrap gap-2">
-              {categories.map((category) => (
+              {businessCategories.map((category) => (
                 <button
                   key={category}
                   className={catalogFilter === category ? 'rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white' : 'rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600'}
