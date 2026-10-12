@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { businesses as businessSeed, initialProducts, payments as paymentSeed, type Business, type Product } from './data/mock';
+import { businesses as businessSeed, initialProducts, payments as paymentSeed, type Business, type Payment, type Product } from './data/mock';
 import { getSupabaseStatusMessage, isSupabaseConfigured, supabase } from './lib/supabase';
 
 type Panel = 'home' | 'admin' | 'merchant' | 'catalog';
@@ -41,6 +41,14 @@ type ProductForm = {
   price: string;
   description: string;
   image: string;
+};
+
+type PaymentForm = {
+  amount: string;
+  date: string;
+  period: string;
+  notes: string;
+  kind: 'Inicial' | 'Mensual';
 };
 
 const categories = ['Todos', 'Panadería', 'Postres', 'Abarrotes', 'Hogar', 'Bebés'];
@@ -111,9 +119,11 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
 
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>('home');
-  const [businesses, setBusinesses] = useState<Business[]>(loadBusinesses);
-  const [products, setProducts] = useState<Product[]>(loadProducts);
+  const [businesses, setBusinesses] = useState<Business[]>(() => isSupabaseConfigured ? [] : loadBusinesses());
+  const [products, setProducts] = useState<Product[]>(() => isSupabaseConfigured ? [] : loadProducts());
   const [payments, setPayments] = useState(paymentSeed);
+  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
+  const [paymentForm, setPaymentForm] = useState<PaymentForm>({ amount: '5', date: new Date().toISOString().slice(0, 10), period: '', notes: '', kind: 'Mensual' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'Todos' | BusinessStatus>('Todos');
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>(businessSeed[0].id);
@@ -503,6 +513,42 @@ export default function App() {
       : business));
   };
 
+  const savePayment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdminDataError('');
+    const amount = Number(paymentForm.amount);
+    if (!hasSelectedBusiness || !Number.isFinite(amount) || amount <= 0 || !paymentForm.date) return;
+    const payment: Payment = {
+      id: `pay-${Date.now()}`,
+      businessId: selectedBusinessId,
+      amount,
+      date: paymentForm.date,
+      period: paymentForm.period.trim() || paymentForm.kind,
+      notes: paymentForm.notes.trim(),
+      kind: paymentForm.kind,
+    };
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { data, error } = await client.from('payments').insert({
+        business_id: selectedBusinessId,
+        amount,
+        payment_date: payment.date,
+        period_covered: payment.period,
+        notes: payment.notes,
+        kind: payment.kind === 'Inicial' ? 'inicial' : 'mensual',
+      }).select('id').single();
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+      payment.id = data.id;
+    }
+    setPayments((current) => [payment, ...current]);
+    setPaymentFormOpen(false);
+    setAdminDataError('');
+  };
+
   const handleMerchantLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMerchantAuthError('');
@@ -559,10 +605,12 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     window.localStorage.setItem(businessesStorageKey, JSON.stringify(businesses));
   }, [businesses]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     window.localStorage.setItem(productsStorageKey, JSON.stringify(products));
   }, [products]);
 
@@ -582,7 +630,9 @@ export default function App() {
         }
         businessQuery = businessQuery.eq('owner_id', userData.user.id);
       } else if (storePath) {
-        businessQuery = businessQuery.eq('slug', decodeURIComponent(storePath[1]));
+        businessQuery = businessQuery.eq('slug', decodeURIComponent(storePath[1])).eq('status', 'activo');
+      } else if (activePanel === 'catalog') {
+        businessQuery = businessQuery.eq('status', 'activo').limit(1);
       } else {
         return;
       }
@@ -628,16 +678,23 @@ export default function App() {
           setRequestedStoreUnavailable(true);
           setProducts([]);
         }
+        if (activePanel === 'catalog') {
+          setRequestedStoreUnavailable(true);
+          setProducts([]);
+        }
         return;
       }
 
       const businessIds = mappedBusinesses.map((business) => business.id);
-      const [{ data: remoteCategories, error: categoriesError }, productsResult] = await Promise.all([
+      const [{ data: remoteCategories, error: categoriesError }, productsResult, paymentsResult] = await Promise.all([
         client.from('categories').select('id,business_id,name').in('business_id', businessIds),
         client.from('products').select('id,business_id,category_id,name,description,price,is_active,image_url').in('business_id', businessIds),
+        adminLoggedIn
+          ? client.from('payments').select('id,business_id,amount,payment_date,period_covered,notes,kind').in('business_id', businessIds).order('payment_date', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ]);
-      if (categoriesError || productsResult.error) {
-        setAdminDataError(categoriesError?.message ?? productsResult.error?.message ?? 'No se pudo cargar el catálogo.');
+      if (categoriesError || productsResult.error || paymentsResult.error) {
+        setAdminDataError(categoriesError?.message ?? productsResult.error?.message ?? paymentsResult.error?.message ?? 'No se pudo cargar el catálogo.');
         return;
       }
       const categoryNames = new Map((remoteCategories ?? []).map((category) => [category.id, category.name]));
@@ -651,6 +708,17 @@ export default function App() {
         active: product.is_active,
         image: product.image_url ?? '',
       }));
+      if (adminLoggedIn && paymentsResult.data) {
+        setPayments(paymentsResult.data.map((payment) => ({
+          id: payment.id,
+          businessId: payment.business_id,
+          amount: Number(payment.amount),
+          date: payment.payment_date,
+          period: payment.period_covered ?? '',
+          notes: payment.notes ?? '',
+          kind: payment.kind === 'inicial' ? 'Inicial' : 'Mensual',
+        })));
+      }
       const businessesWithCounts = mappedBusinesses.map((business) => ({ ...business, productsCount: mappedProducts.filter((product) => product.businessId === business.id).length }));
       if (adminLoggedIn) {
         setBusinesses(businessesWithCounts);
@@ -662,6 +730,11 @@ export default function App() {
       } else if (merchantLoggedIn) {
         setBusinesses(businessesWithCounts);
         setSelectedBusinessId(businessesWithCounts[0].id);
+      } else if (activePanel === 'catalog') {
+        const catalogBusiness = businessesWithCounts[0];
+        setBusinesses(businessesWithCounts);
+        setSelectedBusinessId(catalogBusiness.id);
+        setRequestedStoreUnavailable(false);
       } else {
         setBusinesses((current) => [...current.filter((business) => !businessIds.includes(business.id)), ...businessesWithCounts]);
       }
@@ -680,7 +753,7 @@ export default function App() {
     };
 
     void loadCatalogData();
-  }, [adminLoggedIn, merchantLoggedIn]);
+  }, [activePanel, adminLoggedIn, merchantLoggedIn]);
 
   useEffect(() => {
     const client = supabase;
@@ -1174,11 +1247,12 @@ export default function App() {
                     <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Pagos</p>
                     <h3 className="text-2xl font-semibold text-slate-900">Historial de pagos</h3>
                   </div>
-                  <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700" onClick={() => { setPaymentForm({ amount: '5', date: new Date().toISOString().slice(0, 10), period: '', notes: '', kind: 'Mensual' }); setPaymentFormOpen(true); }}>
                     <CreditCard className="h-4 w-4" />
                     Registrar pago
                   </button>
                 </div>
+                {adminDataError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{adminDataError}</p>}
                 <div className="space-y-3">
                   {payments.map((payment) => (
                     <div key={payment.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1193,6 +1267,16 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {paymentFormOpen && (
+                  <form className="mt-5 grid gap-3 border-t border-slate-200 pt-5 sm:grid-cols-2" onSubmit={savePayment}>
+                    <label className="text-sm font-medium text-slate-700">Monto (USD)<input required min="0.01" step="0.01" type="number" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+                    <label className="text-sm font-medium text-slate-700">Fecha<input required type="date" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={paymentForm.date} onChange={(event) => setPaymentForm((current) => ({ ...current, date: event.target.value }))} /></label>
+                    <label className="text-sm font-medium text-slate-700">Tipo<select className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={paymentForm.kind} onChange={(event) => setPaymentForm((current) => ({ ...current, kind: event.target.value as PaymentForm['kind'] }))}><option>Mensual</option><option>Inicial</option></select></label>
+                    <label className="text-sm font-medium text-slate-700">Período<input className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Ej. Octubre 2026" value={paymentForm.period} onChange={(event) => setPaymentForm((current) => ({ ...current, period: event.target.value }))} /></label>
+                    <label className="text-sm font-medium text-slate-700 sm:col-span-2">Notas<input className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={paymentForm.notes} onChange={(event) => setPaymentForm((current) => ({ ...current, notes: event.target.value }))} /></label>
+                    <div className="flex gap-2 sm:col-span-2"><button type="submit" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Guardar pago</button><button type="button" className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700" onClick={() => setPaymentFormOpen(false)}>Cancelar</button></div>
+                  </form>
+                )}
               </section>
             </>
           )}
