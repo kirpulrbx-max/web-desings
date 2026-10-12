@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/tienda/:slug",
+      "source": "/(.*)",
       "destination": "/"
     }
   ]
