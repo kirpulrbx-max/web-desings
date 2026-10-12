@@ -48,6 +48,15 @@ npm run build
 
 ## Despliegue
 
+Para Vercel:
+
+1. En `Settings > Environment Variables`, configura la URL de Supabase y una clave pública `anon`/`publishable`.
+2. El build de Vite acepta `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`, además de `SUPABASE_URL` y `SUPABASE_ANON_KEY` usados por algunas integraciones de Vercel. También acepta `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` y `SUPABASE_PUBLISHABLE_KEY`.
+3. Selecciona el entorno `Production` y crea un nuevo deployment después de guardar las variables; Vite las incorpora durante el build.
+4. Usa `npm run build` como comando de build y `dist` como directorio de salida.
+
+No configures `service_role`, `sb_secret` ni otras claves secretas con prefijo `VITE_`, `NEXT_PUBLIC_` o equivalente de cliente. Esas variables se incluirían en el bundle público.
+
 Para Cloudflare Pages:
 
 1. Conecta el repositorio.
