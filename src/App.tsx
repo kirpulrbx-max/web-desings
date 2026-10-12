@@ -92,6 +92,14 @@ const hashMerchantPassword = async (password: string) => {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
+const fromDatabaseStatus = (status: string): BusinessStatus => {
+  if (status === 'activo') return 'Activo';
+  if (status === 'suspendido') return 'Suspendido';
+  return 'Vencido';
+};
+
+const toDatabaseStatus = (status: BusinessStatus) => status.toLowerCase();
+
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>('home');
   const [businesses, setBusinesses] = useState<Business[]>(loadBusinesses);
@@ -111,6 +119,8 @@ export default function App() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState<ProductForm>({ name: '', category: 'Panadería', price: '', description: '', image: '' });
   const [productFeedback, setProductFeedback] = useState('');
+  const [adminDataError, setAdminDataError] = useState('');
+  const [requestedStoreUnavailable, setRequestedStoreUnavailable] = useState(false);
   const [qrSvgElement, setQrSvgElement] = useState<SVGSVGElement | null>(null);
   const [newBusiness, setNewBusiness] = useState<NewBusinessForm>({
     name: '',
@@ -129,7 +139,8 @@ export default function App() {
   });
 
   const selectedBusiness =
-    businesses.find((business) => business.id === selectedBusinessId) ?? businesses[0];
+    businesses.find((business) => business.id === selectedBusinessId) ?? businesses[0] ?? businessSeed[0];
+  const hasSelectedBusiness = businesses.some((business) => business.id === selectedBusinessId);
 
   const filteredBusinesses = useMemo(() => {
     return businesses.filter((business) => {
@@ -207,11 +218,12 @@ export default function App() {
     });
   };
 
-  const addBusiness = () => {
-    if (!newBusiness.name.trim() || !newBusiness.email.trim() || newBusiness.password.length < 8) return;
-    const slug = newBusiness.slug || newBusiness.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    void hashMerchantPassword(newBusiness.password).then((merchantPasswordHash) => {
-      const createdBusiness: Business = {
+  const addBusiness = async () => {
+    if (!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)) return;
+    setAdminDataError('');
+    const slug = newBusiness.slug.trim() || newBusiness.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    let merchantPasswordHash: string | undefined;
+    let createdBusiness: Business = {
       id: `biz-${Date.now()}`,
       name: newBusiness.name,
       slug,
@@ -221,16 +233,41 @@ export default function App() {
       activatedAt: new Date().toISOString().slice(0, 10),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       ownerEmail: newBusiness.email,
-      merchantPasswordHash,
+      merchantPasswordHash: undefined,
       productsCount: 0,
       initialProductsLoaded: false,
       graceDays: 0,
-      };
-      setBusinesses((current) => [createdBusiness, ...current]);
-      setSelectedBusinessId(createdBusiness.id);
-      setNewBusiness({ name: '', slug: '', whatsapp: '', email: '', password: '' });
-      setActivePanel('admin');
-    });
+    };
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { data: owner, error: ownerError } = await client.from('profiles').select('id').eq('email', newBusiness.email.trim()).maybeSingle();
+      if (ownerError || !owner) {
+        setAdminDataError(ownerError?.message ?? 'Primero crea la cuenta del comerciante en Supabase Auth y su perfil en public.profiles.');
+        return;
+      }
+      const { data: insertedBusiness, error } = await client.from('businesses').insert({
+        owner_id: owner.id,
+        name: createdBusiness.name,
+        slug: createdBusiness.slug,
+        whatsapp: createdBusiness.whatsapp,
+        status: 'activo',
+        activated_at: createdBusiness.activatedAt,
+        expires_at: createdBusiness.expiresAt,
+      }).select('id').single();
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+      createdBusiness = { ...createdBusiness, id: insertedBusiness.id };
+    } else {
+      merchantPasswordHash = await hashMerchantPassword(newBusiness.password);
+      createdBusiness = { ...createdBusiness, merchantPasswordHash };
+    }
+    setBusinesses((current) => [createdBusiness, ...current]);
+    setSelectedBusinessId(createdBusiness.id);
+    setNewBusiness({ name: '', slug: '', whatsapp: '', email: '', password: '' });
+    setActivePanel('admin');
   };
 
   const selectBusinessForEdit = (business: Business) => {
@@ -239,26 +276,55 @@ export default function App() {
   };
 
   const saveBusinessDetails = async () => {
-    if (!businessForm.name.trim() || !businessForm.email.trim()) return;
-    if (businessForm.password && businessForm.password.length < 8) return;
+    if (isSupabaseConfigured && !hasSelectedBusiness) return;
+    if (!businessForm.name.trim() || (!isSupabaseConfigured && !businessForm.email.trim())) return;
+    if (!isSupabaseConfigured && businessForm.password && businessForm.password.length < 8) return;
     const passwordHash = businessForm.password ? await hashMerchantPassword(businessForm.password) : undefined;
-    setBusinesses((current) => current.map((business) => business.id === selectedBusinessId ? {
-      ...business,
+    const updatedBusiness = {
+      ...selectedBusiness,
       name: businessForm.name.trim(),
       slug: businessForm.slug.trim() || businessForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       whatsapp: businessForm.whatsapp.trim(),
-      ownerEmail: businessForm.email.trim(),
+      ownerEmail: isSupabaseConfigured ? selectedBusiness.ownerEmail : businessForm.email.trim(),
       ...(passwordHash ? { merchantPasswordHash: passwordHash } : {}),
-    } : business));
+    };
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { error } = await client.from('businesses').update({
+        name: updatedBusiness.name,
+        slug: updatedBusiness.slug,
+        whatsapp: updatedBusiness.whatsapp,
+      }).eq('id', selectedBusinessId);
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+    }
+    setBusinesses((current) => current.map((business) => business.id === selectedBusinessId ? updatedBusiness : business));
+    setAdminDataError('');
     setBusinessForm((current) => ({ ...current, password: '' }));
   };
 
-  const toggleBusinessStatus = (businessId: string) => {
+  const toggleBusinessStatus = async (businessId: string) => {
+    const business = businesses.find((item) => item.id === businessId);
+    if (!business) return;
+    const nextStatus: BusinessStatus = business.status === 'Activo' ? 'Suspendido' : 'Activo';
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { error } = await client.from('businesses').update({ status: toDatabaseStatus(nextStatus) }).eq('id', businessId);
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+    }
     setBusinesses((current) => current.map((business) => business.id === businessId ? {
       ...business,
-      status: business.status === 'Activo' ? 'Suspendido' : 'Activo',
-      activatedAt: business.status === 'Activo' ? business.activatedAt : new Date().toISOString().slice(0, 10),
+      status: nextStatus,
+      activatedAt: nextStatus === 'Suspendido' ? business.activatedAt : new Date().toISOString().slice(0, 10),
     } : business));
+    setAdminDataError('');
   };
 
   const resetProductForm = () => {
@@ -266,8 +332,13 @@ export default function App() {
     setProductForm({ name: '', category: 'Panadería', price: '', description: '', image: '' });
   };
 
-  const saveProduct = (event: FormEvent<HTMLFormElement>) => {
+  const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setAdminDataError('');
+    if (isSupabaseConfigured && !businesses.some((business) => business.id === selectedBusinessId)) {
+      setAdminDataError('Selecciona o crea una tienda real antes de guardar publicaciones.');
+      return;
+    }
     const price = Number(productForm.price);
     if (!productForm.name.trim() || !productForm.category || !Number.isFinite(price) || price <= 0) return;
     const product: Product = {
@@ -280,6 +351,56 @@ export default function App() {
       active: products.find((item) => item.id === editingProductId)?.active ?? true,
       image: productForm.image.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80',
     };
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { data: existingCategory, error: findCategoryError } = await client
+        .from('categories')
+        .select('id')
+        .eq('business_id', selectedBusinessId)
+        .eq('name', product.category)
+        .maybeSingle();
+      if (findCategoryError) {
+        setAdminDataError(findCategoryError.message);
+        return;
+      }
+      let categoryId = existingCategory?.id;
+      if (!categoryId) {
+        const { data: createdCategory, error: createCategoryError } = await client
+          .from('categories')
+          .insert({ business_id: selectedBusinessId, name: product.category })
+          .select('id')
+          .single();
+        if (createCategoryError) {
+          setAdminDataError(createCategoryError.message);
+          return;
+        }
+        categoryId = createdCategory.id;
+      }
+      const productRow = {
+        business_id: selectedBusinessId,
+        category_id: categoryId,
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        is_active: product.active,
+        image_url: product.image,
+      };
+      if (editingProductId) {
+        const { error } = await client.from('products').update(productRow).eq('id', editingProductId);
+        if (error) {
+          setAdminDataError(error.message);
+          return;
+        }
+      } else {
+        const { data: insertedProduct, error } = await client.from('products').insert(productRow).select('id').single();
+        if (error) {
+          setAdminDataError(error.message);
+          return;
+        }
+        product.id = insertedProduct.id;
+      }
+    }
     setProducts((current) => editingProductId
       ? current.map((item) => item.id === editingProductId ? product : item)
       : [product, ...current]);
@@ -287,6 +408,7 @@ export default function App() {
       ? { ...business, productsCount: editingProductId ? business.productsCount : business.productsCount + 1 }
       : business));
     setProductFeedback(editingProductId ? 'Publicación actualizada.' : 'Publicación creada.');
+    setAdminDataError('');
     resetProductForm();
   };
 
@@ -297,7 +419,17 @@ export default function App() {
     document.getElementById('admin-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  const removeProduct = (productId: string) => {
+  const removeProduct = async (productId: string) => {
+    setAdminDataError('');
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { error } = await client.from('products').delete().eq('id', productId);
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+    }
     setProducts((current) => current.filter((product) => product.id !== productId));
     setBusinesses((current) => current.map((business) => business.id === selectedBusinessId
       ? { ...business, productsCount: Math.max(0, business.productsCount - 1) }
@@ -318,12 +450,23 @@ export default function App() {
     setMerchantLoggedIn(true);
   };
 
-  const toggleProductStatus = (productId: string) => {
+  const toggleProductStatus = async (productId: string) => {
+    const product = products.find((item) => item.id === productId);
+    if (isSupabaseConfigured && product) {
+      const client = supabase;
+      if (!client) return;
+      const { error } = await client.from('products').update({ is_active: !product.active }).eq('id', productId);
+      if (error) {
+        setAdminDataError(error.message);
+        return;
+      }
+    }
     setProducts((current) =>
       current.map((product) =>
         product.id === productId ? { ...product, active: !product.active } : product,
       ),
     );
+    setAdminDataError('');
   };
 
   useEffect(() => {
@@ -333,6 +476,105 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(productsStorageKey, JSON.stringify(products));
   }, [products]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !isSupabaseConfigured) return;
+
+    const loadCatalogData = async () => {
+      const storePath = window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/);
+      let businessQuery = client.from('businesses').select('id,owner_id,name,slug,whatsapp,status,created_at,activated_at,expires_at,initial_products_loaded,grace_days,profiles(email)');
+      if (adminLoggedIn) {
+      } else if (storePath) {
+        businessQuery = businessQuery.eq('slug', decodeURIComponent(storePath[1]));
+      } else {
+        return;
+      }
+
+      const { data: remoteBusinesses, error: businessesError } = await businessQuery;
+      if (businessesError) {
+        setAdminDataError(businessesError.message);
+        return;
+      }
+      const mappedBusinesses: Business[] = (remoteBusinesses ?? []).map((business) => {
+        const profileRelation = business.profiles as unknown as { email?: string } | { email?: string }[] | null;
+        const ownerEmail = Array.isArray(profileRelation) ? profileRelation[0]?.email ?? '' : profileRelation?.email ?? '';
+        return {
+          id: business.id,
+          name: business.name,
+          slug: business.slug,
+          whatsapp: business.whatsapp ?? '',
+          status: fromDatabaseStatus(business.status),
+          createdAt: business.created_at?.slice(0, 10) ?? '',
+          activatedAt: business.activated_at?.slice(0, 10) ?? null,
+          expiresAt: business.expires_at?.slice(0, 10) ?? '',
+          ownerEmail,
+          productsCount: 0,
+          initialProductsLoaded: business.initial_products_loaded,
+          graceDays: business.grace_days,
+        };
+      });
+      if (mappedBusinesses.length === 0) {
+        if (adminLoggedIn) {
+          setBusinesses([]);
+          setProducts([]);
+          setSelectedBusinessId('');
+          setBusinessForm({ name: '', slug: '', whatsapp: '', email: '', password: '' });
+        }
+        if (storePath) {
+          setRequestedStoreUnavailable(true);
+          setProducts([]);
+        }
+        return;
+      }
+
+      const businessIds = mappedBusinesses.map((business) => business.id);
+      const [{ data: remoteCategories, error: categoriesError }, productsResult] = await Promise.all([
+        client.from('categories').select('id,business_id,name').in('business_id', businessIds),
+        client.from('products').select('id,business_id,category_id,name,description,price,is_active,image_url').in('business_id', businessIds),
+      ]);
+      if (categoriesError || productsResult.error) {
+        setAdminDataError(categoriesError?.message ?? productsResult.error?.message ?? 'No se pudo cargar el catálogo.');
+        return;
+      }
+      const categoryNames = new Map((remoteCategories ?? []).map((category) => [category.id, category.name]));
+      const mappedProducts: Product[] = (productsResult.data ?? []).map((product) => ({
+        id: product.id,
+        businessId: product.business_id,
+        name: product.name,
+        category: categoryNames.get(product.category_id ?? '') ?? 'Abarrotes',
+        price: Number(product.price),
+        description: product.description ?? '',
+        active: product.is_active,
+        image: product.image_url ?? '',
+      }));
+      const businessesWithCounts = mappedBusinesses.map((business) => ({ ...business, productsCount: mappedProducts.filter((product) => product.businessId === business.id).length }));
+      if (adminLoggedIn) {
+        setBusinesses(businessesWithCounts);
+        if (!businessIds.includes(selectedBusinessId)) {
+          const firstBusiness = businessesWithCounts[0];
+          setSelectedBusinessId(firstBusiness.id);
+          setBusinessForm({ name: firstBusiness.name, slug: firstBusiness.slug, whatsapp: firstBusiness.whatsapp, email: firstBusiness.ownerEmail, password: '' });
+        }
+      } else {
+        setBusinesses((current) => [...current.filter((business) => !businessIds.includes(business.id)), ...businessesWithCounts]);
+      }
+      setProducts((current) => adminLoggedIn ? mappedProducts : [...current.filter((product) => !businessIds.includes(product.businessId)), ...mappedProducts]);
+      if (storePath) {
+        const targetBusiness = mappedBusinesses.find((business) => business.slug === decodeURIComponent(storePath[1]));
+        if (targetBusiness) {
+          setRequestedStoreUnavailable(false);
+          setSelectedBusinessId(targetBusiness.id);
+          setActivePanel('catalog');
+        }
+        setBusinesses(mappedBusinesses.map((business) => ({ ...business, productsCount: mappedProducts.filter((product) => product.businessId === business.id).length })));
+        setProducts(mappedProducts);
+      }
+      setAdminDataError('');
+    };
+
+    void loadCatalogData();
+  }, [adminLoggedIn]);
 
   useEffect(() => {
     const client = supabase;
@@ -617,6 +859,7 @@ export default function App() {
             </section>
           ) : (
             <>
+              {adminDataError && <section className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{adminDataError}</section>}
               <section className="grid gap-4 md:grid-cols-4">
                 <StatCard label="Negocios activos" value={String(adminMetrics.activeCount)} icon={<CheckCircle2 className="h-5 w-5" />} tone="emerald" />
                 <StatCard label="Suspendidos" value={String(adminMetrics.suspendedCount)} icon={<BarChart3 className="h-5 w-5" />} tone="amber" />
@@ -711,7 +954,7 @@ export default function App() {
                         placeholder="+58414..."
                       />
                     </label>
-                    <label className="block text-sm text-slate-700">
+                    {!isSupabaseConfigured && <label className="block text-sm text-slate-700">
                       <span className="mb-2 block font-medium">Correo del comerciante</span>
                       <input
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
@@ -719,8 +962,8 @@ export default function App() {
                         value={businessForm.email}
                         onChange={(event) => setBusinessForm((current) => ({ ...current, email: event.target.value }))}
                       />
-                    </label>
-                    <label className="block text-sm text-slate-700">
+                    </label>}
+                    {!isSupabaseConfigured && <label className="block text-sm text-slate-700">
                       <span className="mb-2 block font-medium">Contraseña del panel de comerciante</span>
                       <input
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
@@ -730,8 +973,8 @@ export default function App() {
                         onChange={(event) => setBusinessForm((current) => ({ ...current, password: event.target.value }))}
                         placeholder="Dejar en blanco para mantener la actual"
                       />
-                    </label>
-                    <button className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void saveBusinessDetails()} disabled={!businessForm.name.trim() || !businessForm.email.trim() || Boolean(businessForm.password && businessForm.password.length < 8)}>
+                    </label>}
+                    <button className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void saveBusinessDetails()} disabled={!hasSelectedBusiness || !businessForm.name.trim() || (!isSupabaseConfigured && (!businessForm.email.trim() || Boolean(businessForm.password && businessForm.password.length < 8)))}>
                       Guardar cambios del negocio
                     </button>
                     <div className="border-t border-slate-200 pt-4">
@@ -741,10 +984,14 @@ export default function App() {
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" placeholder="Slug (opcional)" value={newBusiness.slug} onChange={(event) => setNewBusiness((current) => ({ ...current, slug: event.target.value }))} />
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" placeholder="WhatsApp" value={newBusiness.whatsapp} onChange={(event) => setNewBusiness((current) => ({ ...current, whatsapp: event.target.value }))} />
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="email" placeholder="Correo del comerciante" value={newBusiness.email} onChange={(event) => setNewBusiness((current) => ({ ...current, email: event.target.value }))} />
-                        <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="password" minLength={8} placeholder="Contraseña (mínimo 8 caracteres)" value={newBusiness.password} onChange={(event) => setNewBusiness((current) => ({ ...current, password: event.target.value }))} />
+                        {isSupabaseConfigured ? (
+                          <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">El correo debe pertenecer a un usuario ya creado en Supabase Auth con perfil de comerciante. La contraseña se administra en Supabase.</p>
+                        ) : (
+                          <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="password" minLength={8} placeholder="Contraseña (mínimo 8 caracteres)" value={newBusiness.password} onChange={(event) => setNewBusiness((current) => ({ ...current, password: event.target.value }))} />
+                        )}
                       </div>
                     </div>
-                    <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50" onClick={addBusiness} disabled={!newBusiness.name.trim() || !newBusiness.email.trim() || newBusiness.password.length < 8}>
+                    <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50" onClick={addBusiness} disabled={!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)}>
                       Crear negocio y activar catálogo
                     </button>
                   </div>
@@ -995,6 +1242,13 @@ export default function App() {
 
       {activePanel === 'catalog' && (
         <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+          {requestedStoreUnavailable ? (
+            <section className="mx-auto max-w-2xl rounded-2xl border border-amber-300 bg-amber-50 px-6 py-8 text-center text-amber-950" role="status">
+              <h2 className="text-2xl font-semibold">Tienda no disponible</h2>
+              <p className="mt-2 text-sm">Este catálogo está inactivo o no existe. Contacta al administrador de la tienda.</p>
+            </section>
+          ) : (
+            <>
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1115,6 +1369,8 @@ export default function App() {
               </div>
             </aside>
           </section>
+            </>
+          )}
         </main>
       )}
 
