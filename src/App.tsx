@@ -34,8 +34,27 @@ type NewBusinessForm = {
   password: string;
 };
 
+type ProductForm = {
+  name: string;
+  category: string;
+  price: string;
+  description: string;
+  image: string;
+};
+
 const categories = ['Todos', 'Panadería', 'Postres', 'Abarrotes', 'Hogar', 'Bebés'];
 const businessesStorageKey = 'catalogo-facil-businesses';
+const productsStorageKey = 'catalogo-facil-products';
+
+const loadProducts = (): Product[] => {
+  if (typeof window === 'undefined') return initialProducts;
+  try {
+    const savedProducts = window.localStorage.getItem(productsStorageKey);
+    return savedProducts ? JSON.parse(savedProducts) as Product[] : initialProducts;
+  } catch {
+    return initialProducts;
+  }
+};
 
 const loadBusinesses = (): Business[] => {
   if (typeof window === 'undefined') return businessSeed;
@@ -76,7 +95,7 @@ const hashMerchantPassword = async (password: string) => {
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>('home');
   const [businesses, setBusinesses] = useState<Business[]>(loadBusinesses);
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>(loadProducts);
   const [payments, setPayments] = useState(paymentSeed);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'Todos' | BusinessStatus>('Todos');
@@ -89,6 +108,9 @@ export default function App() {
   const [merchantForm, setMerchantForm] = useState({ email: '', password: '' });
   const [merchantAuthError, setMerchantAuthError] = useState('');
   const [catalogFilter, setCatalogFilter] = useState('Todos');
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState<ProductForm>({ name: '', category: 'Panadería', price: '', description: '', image: '' });
+  const [productFeedback, setProductFeedback] = useState('');
   const [qrSvgElement, setQrSvgElement] = useState<SVGSVGElement | null>(null);
   const [newBusiness, setNewBusiness] = useState<NewBusinessForm>({
     name: '',
@@ -123,7 +145,7 @@ export default function App() {
     return products.filter((product) => {
       const matchesBusiness = product.businessId === selectedBusiness.id;
       const matchesCategory = catalogFilter === 'Todos' || product.category === catalogFilter;
-      return matchesBusiness && product.active && matchesCategory;
+      return selectedBusiness.status === 'Activo' && matchesBusiness && product.active && matchesCategory;
     });
   }, [catalogFilter, products, selectedBusiness.id]);
 
@@ -231,6 +253,57 @@ export default function App() {
     setBusinessForm((current) => ({ ...current, password: '' }));
   };
 
+  const toggleBusinessStatus = (businessId: string) => {
+    setBusinesses((current) => current.map((business) => business.id === businessId ? {
+      ...business,
+      status: business.status === 'Activo' ? 'Suspendido' : 'Activo',
+      activatedAt: business.status === 'Activo' ? business.activatedAt : new Date().toISOString().slice(0, 10),
+    } : business));
+  };
+
+  const resetProductForm = () => {
+    setEditingProductId(null);
+    setProductForm({ name: '', category: 'Panadería', price: '', description: '', image: '' });
+  };
+
+  const saveProduct = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const price = Number(productForm.price);
+    if (!productForm.name.trim() || !productForm.category || !Number.isFinite(price) || price <= 0) return;
+    const product: Product = {
+      id: editingProductId ?? `prod-${Date.now()}`,
+      businessId: selectedBusinessId,
+      name: productForm.name.trim(),
+      category: productForm.category,
+      price,
+      description: productForm.description.trim(),
+      active: products.find((item) => item.id === editingProductId)?.active ?? true,
+      image: productForm.image.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80',
+    };
+    setProducts((current) => editingProductId
+      ? current.map((item) => item.id === editingProductId ? product : item)
+      : [product, ...current]);
+    setBusinesses((current) => current.map((business) => business.id === selectedBusinessId
+      ? { ...business, productsCount: editingProductId ? business.productsCount : business.productsCount + 1 }
+      : business));
+    setProductFeedback(editingProductId ? 'Publicación actualizada.' : 'Publicación creada.');
+    resetProductForm();
+  };
+
+  const startProductEdit = (product: Product) => {
+    setEditingProductId(product.id);
+    setProductForm({ name: product.name, category: product.category, price: String(product.price), description: product.description, image: product.image });
+    setProductFeedback('');
+    document.getElementById('admin-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const removeProduct = (productId: string) => {
+    setProducts((current) => current.filter((product) => product.id !== productId));
+    setBusinesses((current) => current.map((business) => business.id === selectedBusinessId
+      ? { ...business, productsCount: Math.max(0, business.productsCount - 1) }
+      : business));
+  };
+
   const handleMerchantLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMerchantAuthError('');
@@ -256,6 +329,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(businessesStorageKey, JSON.stringify(businesses));
   }, [businesses]);
+
+  useEffect(() => {
+    window.localStorage.setItem(productsStorageKey, JSON.stringify(products));
+  }, [products]);
 
   useEffect(() => {
     const client = supabase;
@@ -579,12 +656,11 @@ export default function App() {
 
                   <div className="space-y-3">
                     {filteredBusinesses.map((business) => (
-                      <button
+                      <div
                         key={business.id}
-                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-slate-300 hover:bg-slate-100"
-                        onClick={() => selectBusinessForEdit(business)}
+                        className={`flex flex-col gap-3 rounded-2xl border p-4 transition sm:flex-row sm:items-center sm:justify-between ${selectedBusinessId === business.id ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}
                       >
-                        <div>
+                        <button className="min-w-0 flex-1 text-left" onClick={() => selectBusinessForEdit(business)}>
                           <div className="flex items-center gap-3">
                             <p className="font-semibold text-slate-900">{business.name}</p>
                             <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${statusStyles[business.status]}`}>
@@ -592,12 +668,15 @@ export default function App() {
                             </span>
                           </div>
                           <p className="mt-1 text-xs text-slate-500">/{business.slug} · WhatsApp {business.whatsapp}</p>
-                        </div>
-                        <div className="text-right text-xs text-slate-500">
-                          <p>{business.productsCount} productos</p>
-                          <p>Vence: {business.expiresAt}</p>
-                        </div>
-                      </button>
+                          <span className="mt-2 block text-xs text-slate-500">{business.productsCount} publicaciones · Vence: {business.expiresAt}</span>
+                        </button>
+                        <button
+                          className={business.status === 'Activo' ? 'rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800' : 'rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-semibold text-emerald-800'}
+                          onClick={() => toggleBusinessStatus(business.id)}
+                        >
+                          {business.status === 'Activo' ? 'Suspender tienda' : 'Activar tienda'}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -668,6 +747,72 @@ export default function App() {
                     <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50" onClick={addBusiness} disabled={!newBusiness.name.trim() || !newBusiness.email.trim() || newBusiness.password.length < 8}>
                       Crear negocio y activar catálogo
                     </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+                <div id="admin-product-form" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Publicaciones de {selectedBusiness.name}</p>
+                  <h3 className="mt-2 text-2xl font-semibold text-slate-900">{editingProductId ? 'Editar publicación' : 'Nueva publicación'}</h3>
+                  <form className="mt-5 space-y-4" onSubmit={saveProduct}>
+                    <label className="block text-sm text-slate-700">
+                      <span className="mb-2 block font-medium">Nombre</span>
+                      <input required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block text-sm text-slate-700">
+                        <span className="mb-2 block font-medium">Categoría</span>
+                        <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
+                          {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
+                        </select>
+                      </label>
+                      <label className="block text-sm text-slate-700">
+                        <span className="mb-2 block font-medium">Precio (USD)</span>
+                        <input required min="0.01" step="0.01" type="number" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} />
+                      </label>
+                    </div>
+                    <label className="block text-sm text-slate-700">
+                      <span className="mb-2 block font-medium">Descripción</span>
+                      <textarea rows={3} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                    <label className="block text-sm text-slate-700">
+                      <span className="mb-2 block font-medium">URL de imagen</span>
+                      <input type="url" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" placeholder="https://..." value={productForm.image} onChange={(event) => setProductForm((current) => ({ ...current, image: event.target.value }))} />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white" type="submit">{editingProductId ? 'Guardar publicación' : 'Crear publicación'}</button>
+                      {editingProductId && <button className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700" type="button" onClick={resetProductForm}>Cancelar</button>}
+                    </div>
+                    {productFeedback && <p className="text-sm text-emerald-700">{productFeedback}</p>}
+                  </form>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Catálogo</p>
+                      <h3 className="text-2xl font-semibold text-slate-900">Publicaciones existentes</h3>
+                    </div>
+                    <span className="text-sm text-slate-500">{products.filter((product) => product.businessId === selectedBusinessId).length} total</span>
+                  </div>
+                  <div className="space-y-3">
+                    {products.filter((product) => product.businessId === selectedBusinessId).map((product) => (
+                      <article key={product.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center">
+                        <img src={product.image} alt="" className="h-16 w-16 rounded-xl bg-white object-cover" />
+                        <div className="min-w-0 flex-1">
+                          <h4 className="truncate font-semibold text-slate-900">{product.name}</h4>
+                          <p className="text-xs text-slate-500">{product.category} · {formatMoney(product.price)}</p>
+                          <span className={product.active ? 'mt-1 inline-block text-xs font-medium text-emerald-700' : 'mt-1 inline-block text-xs font-medium text-slate-500'}>{product.active ? 'Visible en tienda' : 'Oculta'}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700" onClick={() => startProductEdit(product)}>Editar</button>
+                          <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700" onClick={() => toggleProductStatus(product.id)}>{product.active ? 'Desactivar' : 'Activar'}</button>
+                          <button className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-medium text-rose-700" onClick={() => removeProduct(product.id)}>Eliminar</button>
+                        </div>
+                      </article>
+                    ))}
+                    {products.every((product) => product.businessId !== selectedBusinessId) && <p className="rounded-xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">Todavía no hay publicaciones para esta tienda.</p>}
                   </div>
                 </div>
               </section>
@@ -880,6 +1025,12 @@ export default function App() {
               ))}
             </div>
           </section>
+
+          {selectedBusiness.status !== 'Activo' && (
+            <section className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900" role="status">
+              El catálogo de {selectedBusiness.name} no está disponible temporalmente.
+            </section>
+          )}
 
           <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
