@@ -33,3 +33,35 @@ for select using (
       and b.status = 'activo'
   )
 );
+
+drop policy if exists "Comerciante administra sus propios productos" on public.products;
+create policy "Comerciante administra sus propios productos" on public.products
+for all using (
+  exists (
+    select 1 from public.businesses b
+    where b.id = products.business_id and b.owner_id = auth.uid()
+  )
+) with check (
+  exists (
+    select 1 from public.businesses b
+    where b.id = products.business_id and b.owner_id = auth.uid()
+  )
+);
+
+drop policy if exists "Comerciante administra sus propias categorías" on public.categories;
+create policy "Comerciante administra sus propias categorías" on public.categories
+for all using (
+  exists (
+    select 1 from public.businesses b
+    where b.id = categories.business_id and b.owner_id = auth.uid()
+  )
+) with check (
+  exists (
+    select 1 from public.businesses b
+    where b.id = categories.business_id and b.owner_id = auth.uid()
+  )
+);
+
+drop policy if exists "Comerciante ve su tienda" on public.businesses;
+create policy "Comerciante ve su tienda" on public.businesses
+for select using (owner_id = auth.uid());

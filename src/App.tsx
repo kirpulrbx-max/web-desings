@@ -117,6 +117,7 @@ export default function App() {
   const [merchantAuthError, setMerchantAuthError] = useState('');
   const [catalogFilter, setCatalogFilter] = useState('Todos');
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [merchantProductFormOpen, setMerchantProductFormOpen] = useState(false);
   const [productForm, setProductForm] = useState<ProductForm>({ name: '', category: 'Panadería', price: '', description: '', image: '' });
   const [productFeedback, setProductFeedback] = useState('');
   const [adminDataError, setAdminDataError] = useState('');
@@ -330,6 +331,7 @@ export default function App() {
   const resetProductForm = () => {
     setEditingProductId(null);
     setProductForm({ name: '', category: 'Panadería', price: '', description: '', image: '' });
+    setMerchantProductFormOpen(false);
   };
 
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
@@ -416,6 +418,8 @@ export default function App() {
     setEditingProductId(product.id);
     setProductForm({ name: product.name, category: product.category, price: String(product.price), description: product.description, image: product.image });
     setProductFeedback('');
+    setMerchantProductFormOpen(true);
+    document.getElementById('merchant-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     document.getElementById('admin-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
@@ -440,6 +444,28 @@ export default function App() {
     event.preventDefault();
     setMerchantAuthError('');
     const email = merchantForm.email.trim().toLowerCase();
+    if (isSupabaseConfigured) {
+      const client = supabase;
+      if (!client) return;
+      const { data, error } = await client.auth.signInWithPassword({ email, password: merchantForm.password });
+      if (error || !data.user) {
+        setMerchantAuthError(error?.message ?? 'No se pudo iniciar sesión.');
+        return;
+      }
+      const { data: ownedBusinesses, error: businessError } = await client
+        .from('businesses')
+        .select('id')
+        .eq('owner_id', data.user.id)
+        .limit(1);
+      if (businessError || !ownedBusinesses?.length) {
+        await client.auth.signOut();
+        setMerchantAuthError(businessError?.message ?? 'Esta cuenta todavía no tiene una tienda asignada.');
+        return;
+      }
+      setMerchantLoggedIn(true);
+      setActivePanel('merchant');
+      return;
+    }
     const business = businesses.find((item) => item.ownerEmail.toLowerCase() === email);
     if (!business?.merchantPasswordHash || await hashMerchantPassword(merchantForm.password) !== business.merchantPasswordHash) {
       setMerchantAuthError('Correo o contraseña incorrectos. Confirma tus datos con el administrador.');
@@ -485,6 +511,13 @@ export default function App() {
       const storePath = window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/);
       let businessQuery = client.from('businesses').select('id,owner_id,name,slug,whatsapp,status,created_at,activated_at,expires_at,initial_products_loaded,grace_days,profiles(email)');
       if (adminLoggedIn) {
+      } else if (merchantLoggedIn) {
+        const { data: userData, error: userError } = await client.auth.getUser();
+        if (userError || !userData.user) {
+          setAdminDataError(userError?.message ?? 'La sesión del comerciante expiró. Vuelve a iniciar sesión.');
+          return;
+        }
+        businessQuery = businessQuery.eq('owner_id', userData.user.id);
       } else if (storePath) {
         businessQuery = businessQuery.eq('slug', decodeURIComponent(storePath[1]));
       } else {
@@ -521,6 +554,13 @@ export default function App() {
           setSelectedBusinessId('');
           setBusinessForm({ name: '', slug: '', whatsapp: '', email: '', password: '' });
         }
+        if (merchantLoggedIn) {
+          setBusinesses([]);
+          setProducts([]);
+          setMerchantLoggedIn(false);
+          setMerchantAuthError('Esta cuenta no tiene una tienda asignada. Contacta al administrador.');
+          return;
+        }
         if (storePath) {
           setRequestedStoreUnavailable(true);
           setProducts([]);
@@ -556,10 +596,13 @@ export default function App() {
           setSelectedBusinessId(firstBusiness.id);
           setBusinessForm({ name: firstBusiness.name, slug: firstBusiness.slug, whatsapp: firstBusiness.whatsapp, email: firstBusiness.ownerEmail, password: '' });
         }
+      } else if (merchantLoggedIn) {
+        setBusinesses(businessesWithCounts);
+        setSelectedBusinessId(businessesWithCounts[0].id);
       } else {
         setBusinesses((current) => [...current.filter((business) => !businessIds.includes(business.id)), ...businessesWithCounts]);
       }
-      setProducts((current) => adminLoggedIn ? mappedProducts : [...current.filter((product) => !businessIds.includes(product.businessId)), ...mappedProducts]);
+      setProducts((current) => adminLoggedIn || merchantLoggedIn ? mappedProducts : [...current.filter((product) => !businessIds.includes(product.businessId)), ...mappedProducts]);
       if (storePath) {
         const targetBusiness = mappedBusinesses.find((business) => business.slug === decodeURIComponent(storePath[1]));
         if (targetBusiness) {
@@ -574,7 +617,7 @@ export default function App() {
     };
 
     void loadCatalogData();
-  }, [adminLoggedIn]);
+  }, [adminLoggedIn, merchantLoggedIn]);
 
   useEffect(() => {
     const client = supabase;
@@ -1152,7 +1195,9 @@ export default function App() {
                   <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Productos</p>
                   <h3 className="text-2xl font-semibold text-slate-900">Gestión del catálogo</h3>
                 </div>
-                <button className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Añadir producto</button>
+                <button className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" onClick={() => { resetProductForm(); setMerchantProductFormOpen(true); setProductFeedback(''); setAdminDataError(''); }}>
+                  Añadir producto
+                </button>
               </div>
 
               <div className="space-y-3">
@@ -1174,11 +1219,49 @@ export default function App() {
                         >
                           {product.active ? 'Activo' : 'Inactivo'}
                         </button>
-                        <button className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700">Editar</button>
+                        <button className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700" onClick={() => startProductEdit(product)}>Editar</button>
                       </div>
                     </div>
                   ))}
               </div>
+              {merchantProductFormOpen && (
+                <form id="merchant-product-form" className="mt-6 space-y-4 border-t border-slate-200 pt-5" onSubmit={saveProduct}>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{editingProductId ? 'Editar publicación' : 'Nueva publicación'}</p>
+                    <h4 className="mt-1 text-lg font-semibold text-slate-900">{editingProductId ? 'Actualizar producto' : 'Publicar un producto'}</h4>
+                  </div>
+                  <label className="block text-sm text-slate-700">
+                    <span className="mb-2 block font-medium">Nombre</span>
+                    <input required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} />
+                  </label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm text-slate-700">
+                      <span className="mb-2 block font-medium">Categoría</span>
+                      <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}>
+                        {categories.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-sm text-slate-700">
+                      <span className="mb-2 block font-medium">Precio (USD)</span>
+                      <input required type="number" min="0.01" step="0.01" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} />
+                    </label>
+                  </div>
+                  <label className="block text-sm text-slate-700">
+                    <span className="mb-2 block font-medium">Descripción</span>
+                    <textarea rows={3} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} />
+                  </label>
+                  <label className="block text-sm text-slate-700">
+                    <span className="mb-2 block font-medium">Imagen (URL)</span>
+                    <input type="url" placeholder="https://..." className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={productForm.image} onChange={(event) => setProductForm((current) => ({ ...current, image: event.target.value }))} />
+                  </label>
+                  {adminDataError && <p className="text-sm text-rose-700" role="alert">{adminDataError}</p>}
+                  {productFeedback && <p className="text-sm text-emerald-700" role="status">{productFeedback}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <button className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white" type="submit">{editingProductId ? 'Guardar cambios' : 'Publicar producto'}</button>
+                    <button className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700" type="button" onClick={resetProductForm}>Cancelar</button>
+                  </div>
+                </form>
+              )}
             </div>
 
             <div className="space-y-6">
