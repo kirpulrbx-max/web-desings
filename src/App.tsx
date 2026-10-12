@@ -44,6 +44,7 @@ type ProductForm = {
 };
 
 const categories = ['Todos', 'Panadería', 'Postres', 'Abarrotes', 'Hogar', 'Bebés'];
+const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://web-desings.vercel.app').replace(/\/+$/, '');
 const businessesStorageKey = 'catalogo-facil-businesses';
 const productsStorageKey = 'catalogo-facil-products';
 
@@ -776,7 +777,7 @@ export default function App() {
     image.src = imageUrl;
   };
 
-  const publicUrl = `${window.location.origin}/tienda/${encodeURIComponent(selectedBusiness.slug)}`;
+  const publicUrl = `${publicAppBaseUrl}/tienda/${encodeURIComponent(selectedBusiness.slug)}`;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 antialiased">
