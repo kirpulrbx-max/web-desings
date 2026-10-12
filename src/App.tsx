@@ -53,6 +53,7 @@ type PaymentForm = {
 
 const categories = ['Todos', 'Panadería', 'Postres', 'Abarrotes', 'Hogar', 'Bebés'];
 const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://web-desings.vercel.app').replace(/\/+$/, '');
+const useLocalDemo = import.meta.env.DEV && !isSupabaseConfigured;
 const businessesStorageKey = 'catalogo-facil-businesses';
 const productsStorageKey = 'catalogo-facil-products';
 
@@ -119,8 +120,8 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
 
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>('home');
-  const [businesses, setBusinesses] = useState<Business[]>(() => isSupabaseConfigured ? [] : loadBusinesses());
-  const [products, setProducts] = useState<Product[]>(() => isSupabaseConfigured ? [] : loadProducts());
+  const [businesses, setBusinesses] = useState<Business[]>(() => useLocalDemo ? loadBusinesses() : []);
+  const [products, setProducts] = useState<Product[]>(() => useLocalDemo ? loadProducts() : []);
   const [payments, setPayments] = useState(paymentSeed);
   const [paymentFormOpen, setPaymentFormOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState<PaymentForm>({ amount: '5', date: new Date().toISOString().slice(0, 10), period: '', notes: '', kind: 'Mensual' });
@@ -249,6 +250,10 @@ export default function App() {
   };
 
   const addBusiness = async () => {
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel y vuelve a desplegar.');
+      return;
+    }
     if (!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)) return;
     setAdminDataError('');
     const slug = newBusiness.slug.trim() || newBusiness.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -306,6 +311,10 @@ export default function App() {
   };
 
   const saveBusinessDetails = async () => {
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: Supabase no está configurado en producción.');
+      return;
+    }
     if (isSupabaseConfigured && !hasSelectedBusiness) return;
     if (!businessForm.name.trim() || (!isSupabaseConfigured && !businessForm.email.trim())) return;
     if (!isSupabaseConfigured && businessForm.password && businessForm.password.length < 8) return;
@@ -337,6 +346,10 @@ export default function App() {
   };
 
   const toggleBusinessStatus = async (businessId: string) => {
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: Supabase no está configurado en producción.');
+      return;
+    }
     const business = businesses.find((item) => item.id === businessId);
     if (!business) return;
     const nextStatus: BusinessStatus = business.status === 'Activo' ? 'Suspendido' : 'Activo';
@@ -385,6 +398,10 @@ export default function App() {
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAdminDataError('');
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel y vuelve a desplegar.');
+      return;
+    }
     if (isSupabaseConfigured && !businesses.some((business) => business.id === selectedBusinessId)) {
       setAdminDataError('Selecciona o crea una tienda real antes de guardar publicaciones.');
       return;
@@ -498,6 +515,10 @@ export default function App() {
 
   const removeProduct = async (productId: string) => {
     setAdminDataError('');
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: Supabase no está configurado en producción.');
+      return;
+    }
     if (isSupabaseConfigured) {
       const client = supabase;
       if (!client) return;
@@ -516,6 +537,10 @@ export default function App() {
   const savePayment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAdminDataError('');
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: Supabase no está configurado en producción.');
+      return;
+    }
     const amount = Number(paymentForm.amount);
     if (!hasSelectedBusiness || !Number.isFinite(amount) || amount <= 0 || !paymentForm.date) return;
     const payment: Payment = {
@@ -575,6 +600,10 @@ export default function App() {
       setActivePanel('merchant');
       return;
     }
+    if (!useLocalDemo) {
+      setMerchantAuthError('Supabase no está configurado en producción. Contacta al administrador.');
+      return;
+    }
     const business = businesses.find((item) => item.ownerEmail.toLowerCase() === email);
     if (!business?.merchantPasswordHash || await hashMerchantPassword(merchantForm.password) !== business.merchantPasswordHash) {
       setMerchantAuthError('Correo o contraseña incorrectos. Confirma tus datos con el administrador.');
@@ -586,6 +615,10 @@ export default function App() {
   };
 
   const toggleProductStatus = async (productId: string) => {
+    if (!isSupabaseConfigured && !useLocalDemo) {
+      setAdminDataError('No se puede guardar: configura las variables de Supabase en Vercel.');
+      return;
+    }
     const product = products.find((item) => item.id === productId);
     if (isSupabaseConfigured && product) {
       const client = supabase;
@@ -605,12 +638,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
+    if (!useLocalDemo) return;
     window.localStorage.setItem(businessesStorageKey, JSON.stringify(businesses));
   }, [businesses]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
+    if (!useLocalDemo) return;
     window.localStorage.setItem(productsStorageKey, JSON.stringify(products));
   }, [products]);
 
@@ -782,7 +815,7 @@ export default function App() {
     event.preventDefault();
     setAuthError('');
 
-    if (!isSupabaseConfigured && adminForm.password === 'Propaul1') {
+    if (useLocalDemo && adminForm.password === 'Propaul1') {
       setAdminLoggedIn(true);
       setActivePanel('admin');
       return;
