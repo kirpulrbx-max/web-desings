@@ -1007,25 +1007,35 @@ export default function App() {
 
   const downloadQrCode = () => {
     if (!qrSvgElement) return;
-    const svg = new XMLSerializer().serializeToString(qrSvgElement);
+    const outputSize = 1024;
+    // Se renderiza el SVG directamente a 1024 px (vectorial) para que el PNG salga nítido y escaneable.
+    const clonedSvg = qrSvgElement.cloneNode(true) as SVGSVGElement;
+    clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clonedSvg.setAttribute('width', String(outputSize));
+    clonedSvg.setAttribute('height', String(outputSize));
+    const svg = new XMLSerializer().serializeToString(clonedSvg);
     const image = new Image();
     const imageUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
     image.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = 1024;
+      canvas.width = outputSize;
+      canvas.height = outputSize;
       const context = canvas.getContext('2d');
       if (!context) return URL.revokeObjectURL(imageUrl);
+      context.imageSmoothingEnabled = false;
       context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      context.fillRect(0, 0, outputSize, outputSize);
+      context.drawImage(image, 0, 0, outputSize, outputSize);
       URL.revokeObjectURL(imageUrl);
       const link = document.createElement('a');
       link.download = `qr-${selectedBusiness.slug}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
     };
-    image.onerror = () => URL.revokeObjectURL(imageUrl);
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl);
+      setAdminDataError('No se pudo generar la imagen del QR. Inténtalo de nuevo.');
+    };
     image.src = imageUrl;
   };
 
