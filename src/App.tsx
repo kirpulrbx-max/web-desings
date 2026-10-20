@@ -163,6 +163,11 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
   reader.readAsDataURL(file);
 });
 
+const explainDbError = (step: string, message: string) =>
+  /row-level security|permission denied|not authorized/i.test(message)
+    ? `Permiso denegado al ${step}. Si eres el administrador, ejecuta supabase/migrations/005_fix_storage_and_catalog_policies.sql en el SQL Editor de Supabase y vuelve a intentar. (${message})`
+    : `Error al ${step}: ${message}`;
+
 const getFunctionErrorMessage = async (error: { message?: string; context?: unknown }) => {
   const context = error.context;
   if (context instanceof Response) {
@@ -502,9 +507,9 @@ export default function App() {
         if (!client) return;
         const safeFileName = selectedImageFile.name.replace(/[^a-zA-Z0-9.-]/g, '-');
         const imagePath = `${selectedBusinessId}/${crypto.randomUUID()}-${safeFileName}`;
-        const { error: uploadError } = await client.storage.from('product-images').upload(imagePath, selectedImageFile, { upsert: true, contentType: selectedImageFile.type });
+        const { error: uploadError } = await client.storage.from('product-images').upload(imagePath, selectedImageFile, { upsert: false, contentType: selectedImageFile.type });
         if (uploadError) {
-          setAdminDataError(uploadError.message);
+          setAdminDataError(explainDbError('subir la imagen', uploadError.message));
           return;
         }
         imageUrl = client.storage.from('product-images').getPublicUrl(imagePath).data.publicUrl;
@@ -537,7 +542,7 @@ export default function App() {
         .eq('name', product.category)
         .maybeSingle();
       if (findCategoryError) {
-        setAdminDataError(findCategoryError.message);
+        setAdminDataError(explainDbError('leer la categoría', findCategoryError.message));
         return;
       }
       let categoryId = existingCategory?.id;
@@ -548,7 +553,7 @@ export default function App() {
           .select('id')
           .single();
         if (createCategoryError) {
-          setAdminDataError(createCategoryError.message);
+          setAdminDataError(explainDbError('crear la categoría', createCategoryError.message));
           return;
         }
         categoryId = createdCategory.id;
@@ -565,13 +570,13 @@ export default function App() {
       if (editingProductId) {
         const { error } = await client.from('products').update(productRow).eq('id', editingProductId);
         if (error) {
-          setAdminDataError(error.message);
+          setAdminDataError(explainDbError('guardar el producto', error.message));
           return;
         }
       } else {
         const { data: insertedProduct, error } = await client.from('products').insert(productRow).select('id').single();
         if (error) {
-          setAdminDataError(error.message);
+          setAdminDataError(explainDbError('guardar el producto', error.message));
           return;
         }
         product.id = insertedProduct.id;
