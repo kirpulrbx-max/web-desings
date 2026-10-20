@@ -85,7 +85,7 @@ for insert to authenticated with check (
     public.is_admin()
     or exists (
       select 1 from public.businesses b
-      where b.id::text = (storage.foldername(name))[1]
+      where b.id::text = (storage.foldername(objects.name))[1]
         and b.owner_id = auth.uid()
     )
   )
@@ -99,7 +99,7 @@ for update to authenticated using (
     public.is_admin()
     or exists (
       select 1 from public.businesses b
-      where b.id::text = (storage.foldername(name))[1]
+      where b.id::text = (storage.foldername(objects.name))[1]
         and b.owner_id = auth.uid()
     )
   )
@@ -109,7 +109,7 @@ for update to authenticated using (
     public.is_admin()
     or exists (
       select 1 from public.businesses b
-      where b.id::text = (storage.foldername(name))[1]
+      where b.id::text = (storage.foldername(objects.name))[1]
         and b.owner_id = auth.uid()
     )
   )
@@ -123,7 +123,7 @@ for delete to authenticated using (
     public.is_admin()
     or exists (
       select 1 from public.businesses b
-      where b.id::text = (storage.foldername(name))[1]
+      where b.id::text = (storage.foldername(objects.name))[1]
         and b.owner_id = auth.uid()
     )
   )
