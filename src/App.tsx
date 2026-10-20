@@ -163,6 +163,19 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
   reader.readAsDataURL(file);
 });
 
+const getFunctionErrorMessage = async (error: { message?: string; context?: unknown }) => {
+  const context = error.context;
+  if (context instanceof Response) {
+    try {
+      const payload = await context.clone().json() as { error?: string };
+      if (payload?.error) return payload.error;
+    } catch {
+      // se usa el mensaje genérico
+    }
+  }
+  return error.message || 'No se pudo completar la operación en el servidor.';
+};
+
 export default function App() {
   const [activePanel, setActivePanel] = useState<Panel>(() => getStoreSlugFromPath() ? 'catalog' : 'home');
   const [storeLoading, setStoreLoading] = useState(() => Boolean(getStoreSlugFromPath()) && isSupabaseConfigured);
@@ -193,6 +206,7 @@ export default function App() {
   const [adminDataError, setAdminDataError] = useState('');
   const [requestedStoreUnavailable, setRequestedStoreUnavailable] = useState(false);
   const [qrSvgElement, setQrSvgElement] = useState<SVGSVGElement | null>(null);
+  const [creatingBusiness, setCreatingBusiness] = useState(false);
   const [newBusiness, setNewBusiness] = useState<NewBusinessForm>({
     name: '',
     slug: '',
@@ -302,7 +316,12 @@ export default function App() {
       setAdminDataError('No se puede guardar: configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel y vuelve a desplegar.');
       return;
     }
-    if (!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)) return;
+    if (creatingBusiness) return;
+    if (!newBusiness.name.trim() || !newBusiness.email.trim()) return;
+    if (newBusiness.password.length < 8) {
+      setAdminDataError('La contraseña del comerciante debe tener al menos 8 caracteres.');
+      return;
+    }
     setAdminDataError('');
     const slug = slugify(newBusiness.slug.trim() || newBusiness.name);
     let merchantPasswordHash: string | undefined;
@@ -324,25 +343,44 @@ export default function App() {
     if (isSupabaseConfigured) {
       const client = supabase;
       if (!client) return;
-      const { data: owner, error: ownerError } = await client.from('profiles').select('id').eq('email', newBusiness.email.trim()).maybeSingle();
-      if (ownerError || !owner) {
-        setAdminDataError(ownerError?.message ?? 'Primero crea la cuenta del comerciante en Supabase Auth y su perfil en public.profiles.');
+      // El servidor crea el usuario (Auth), su perfil y el negocio en un solo paso.
+      setCreatingBusiness(true);
+      try {
+        const { data, error } = await client.functions.invoke('create-merchant', {
+          body: {
+            name: newBusiness.name.trim(),
+            slug,
+            whatsapp: newBusiness.whatsapp.trim(),
+            email: newBusiness.email.trim(),
+            password: newBusiness.password,
+          },
+        });
+        if (error) {
+          setAdminDataError(await getFunctionErrorMessage(error));
+          return;
+        }
+        const remote = data?.business;
+        if (!remote?.id) {
+          setAdminDataError('El servidor no devolvió el negocio creado. Revisa que la función create-merchant esté desplegada en Supabase.');
+          return;
+        }
+        createdBusiness = {
+          ...createdBusiness,
+          id: remote.id,
+          name: remote.name,
+          slug: remote.slug,
+          whatsapp: remote.whatsapp ?? '',
+          createdAt: remote.created_at?.slice(0, 10) ?? createdBusiness.createdAt,
+          activatedAt: remote.activated_at?.slice(0, 10) ?? createdBusiness.activatedAt,
+          expiresAt: remote.expires_at?.slice(0, 10) ?? createdBusiness.expiresAt,
+          ownerEmail: remote.owner_email ?? createdBusiness.ownerEmail,
+        };
+      } catch (error) {
+        setAdminDataError(error instanceof Error ? error.message : 'No se pudo crear el negocio.');
         return;
+      } finally {
+        setCreatingBusiness(false);
       }
-      const { data: insertedBusiness, error } = await client.from('businesses').insert({
-        owner_id: owner.id,
-        name: createdBusiness.name,
-        slug: createdBusiness.slug,
-        whatsapp: createdBusiness.whatsapp,
-        status: 'activo',
-        activated_at: createdBusiness.activatedAt,
-        expires_at: createdBusiness.expiresAt,
-      }).select('id').single();
-      if (error) {
-        setAdminDataError(error.message);
-        return;
-      }
-      createdBusiness = { ...createdBusiness, id: insertedBusiness.id };
     } else {
       merchantPasswordHash = await hashMerchantPassword(newBusiness.password);
       createdBusiness = { ...createdBusiness, merchantPasswordHash };
@@ -1338,15 +1376,12 @@ export default function App() {
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" placeholder="Slug (opcional)" value={newBusiness.slug} onChange={(event) => setNewBusiness((current) => ({ ...current, slug: event.target.value }))} />
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" placeholder="WhatsApp" value={newBusiness.whatsapp} onChange={(event) => setNewBusiness((current) => ({ ...current, whatsapp: event.target.value }))} />
                         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="email" placeholder="Correo del comerciante" value={newBusiness.email} onChange={(event) => setNewBusiness((current) => ({ ...current, email: event.target.value }))} />
-                        {isSupabaseConfigured ? (
-                          <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">El correo debe pertenecer a un usuario ya creado en Supabase Auth con perfil de comerciante. La contraseña se administra en Supabase.</p>
-                        ) : (
-                          <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="password" minLength={8} placeholder="Contraseña (mínimo 8 caracteres)" value={newBusiness.password} onChange={(event) => setNewBusiness((current) => ({ ...current, password: event.target.value }))} />
-                        )}
+                        <input className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" type="password" autoComplete="new-password" minLength={8} placeholder="Contraseña del comerciante (mínimo 8 caracteres)" value={newBusiness.password} onChange={(event) => setNewBusiness((current) => ({ ...current, password: event.target.value }))} />
+                        {isSupabaseConfigured && <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">Al crear el negocio se registra automáticamente la cuenta del comerciante en Supabase. Comparte con él su correo y esta contraseña.</p>}
                       </div>
                     </div>
-                    <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50" onClick={addBusiness} disabled={!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)}>
-                      Crear negocio y activar catálogo
+                    <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50" onClick={addBusiness} disabled={creatingBusiness || !newBusiness.name.trim() || !newBusiness.email.trim() || newBusiness.password.length < 8}>
+                      {creatingBusiness ? 'Creando…' : 'Crear negocio y activar catálogo'}
                     </button>
                   </div>
                 </div>
