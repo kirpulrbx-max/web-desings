@@ -82,6 +82,18 @@ Ejecuta los archivos de la carpeta `supabase/migrations` en el SQL editor de Sup
 - Las operaciones privilegiadas deben ejecutarse en servidor o Edge Functions.
 - Las políticas RLS deben limitar acceso por usuario y negocio.
 
+## Alta automática de comerciantes
+
+Al pulsar **Crear negocio y activar catálogo** en el panel maestro, el servidor crea en un solo paso el usuario del comerciante (Supabase Auth), su perfil y su negocio. Los productos, categorías y pagos también se guardan en Supabase al crearlos desde la app. Para activarlo:
+
+1. En **SQL Editor** de Supabase, ejecuta `supabase/migrations/004_auto_profile.sql` (crea el perfil automáticamente para cada usuario nuevo).
+2. Despliega la función `create-merchant`:
+   - Con la CLI: `supabase functions deploy create-merchant`
+   - O desde el panel: **Edge Functions → Deploy a new function**, nómbrala `create-merchant` y pega el contenido de `supabase/functions/create-merchant/index.ts`. Deja activada la verificación de JWT.
+3. No hace falta configurar claves: Supabase entrega `SUPABASE_SERVICE_ROLE_KEY` a la función de forma segura. Esa clave nunca debe ir en el frontend.
+
+La función solo acepta llamadas de usuarios con rol `admin`.
+
 ## Primera cuenta maestra
 
 1. Crea un usuario autenticado en Supabase.
