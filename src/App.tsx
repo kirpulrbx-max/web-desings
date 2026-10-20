@@ -7,6 +7,7 @@ import {
   Download,
   ImageIcon,
   Lock,
+  Menu,
   Package,
   QrCode,
   Search,
@@ -52,7 +53,51 @@ type PaymentForm = {
 };
 
 const categories = ['Todos', 'Panadería', 'Postres', 'Abarrotes', 'Hogar', 'Bebés'];
-const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://web-desings.vercel.app').replace(/\/+$/, '');
+const publicAppBaseUrl = (
+  import.meta.env.VITE_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')
+).replace(/\/+$/, '');
+const placeholderImage = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect width="400" height="300" fill="#e2e8f0"/><text x="200" y="158" font-family="sans-serif" font-size="18" fill="#64748b" text-anchor="middle">Sin imagen</text></svg>',
+);
+const emptyBusiness: Business = {
+  id: '',
+  name: 'Tienda',
+  slug: '',
+  whatsapp: '',
+  status: 'Vencido',
+  createdAt: '',
+  activatedAt: null,
+  expiresAt: '',
+  ownerEmail: '',
+  productsCount: 0,
+  initialProductsLoaded: false,
+  graceDays: 0,
+};
+
+const slugify = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const getStoreSlugFromPath = () => {
+  if (typeof window === 'undefined') return '';
+  const match = window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+};
+
+function ProductImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return <img src={!src || failed ? placeholderImage : src} alt={alt} className={className} loading="lazy" onError={() => setFailed(true)} />;
+}
 const useLocalDemo = import.meta.env.DEV && !isSupabaseConfigured;
 const businessesStorageKey = 'catalogo-facil-businesses';
 const productsStorageKey = 'catalogo-facil-products';
@@ -119,15 +164,18 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
 });
 
 export default function App() {
-  const [activePanel, setActivePanel] = useState<Panel>('home');
+  const [activePanel, setActivePanel] = useState<Panel>(() => getStoreSlugFromPath() ? 'catalog' : 'home');
+  const [storeLoading, setStoreLoading] = useState(() => Boolean(getStoreSlugFromPath()) && isSupabaseConfigured);
   const [businesses, setBusinesses] = useState<Business[]>(() => useLocalDemo ? loadBusinesses() : []);
   const [products, setProducts] = useState<Product[]>(() => useLocalDemo ? loadProducts() : []);
-  const [payments, setPayments] = useState(paymentSeed);
+  const [payments, setPayments] = useState<Payment[]>(() => useLocalDemo ? paymentSeed : []);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
   const [paymentFormOpen, setPaymentFormOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState<PaymentForm>({ amount: '5', date: new Date().toISOString().slice(0, 10), period: '', notes: '', kind: 'Mensual' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'Todos' | BusinessStatus>('Todos');
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>(businessSeed[0].id);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>(useLocalDemo ? businessSeed[0].id : '');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [adminForm, setAdminForm] = useState({ email: 'admin@catalogofacil.ve', password: '' });
@@ -154,15 +202,15 @@ export default function App() {
   });
 
   const [businessForm, setBusinessForm] = useState({
-    name: businessSeed[0].name,
-    slug: businessSeed[0].slug,
-    whatsapp: businessSeed[0].whatsapp,
-    email: businessSeed[0].ownerEmail,
+    name: useLocalDemo ? businessSeed[0].name : '',
+    slug: useLocalDemo ? businessSeed[0].slug : '',
+    whatsapp: useLocalDemo ? businessSeed[0].whatsapp : '',
+    email: useLocalDemo ? businessSeed[0].ownerEmail : '',
     password: '',
   });
 
   const selectedBusiness =
-    businesses.find((business) => business.id === selectedBusinessId) ?? businesses[0] ?? businessSeed[0];
+    businesses.find((business) => business.id === selectedBusinessId) ?? businesses[0] ?? (useLocalDemo ? businessSeed[0] : emptyBusiness);
   const hasSelectedBusiness = businesses.some((business) => business.id === selectedBusinessId);
 
   const filteredBusinesses = useMemo(() => {
@@ -195,11 +243,11 @@ export default function App() {
     return Object.entries(cart)
       .map(([productId, quantity]) => {
         const item = products.find((product) => product.id === productId);
-        if (!item || quantity <= 0) return null;
+        if (!item || quantity <= 0 || item.businessId !== selectedBusiness.id || !item.active) return null;
         return { ...item, quantity };
       })
       .filter(Boolean) as Array<Product & { quantity: number }>;
-  }, [cart, products]);
+  }, [cart, products, selectedBusiness.id]);
 
   const totalCart = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -222,7 +270,7 @@ export default function App() {
   }, [products, selectedBusiness.id]);
 
   useEffect(() => {
-    const requestedSlug = decodeURIComponent(window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/)?.[1] ?? '');
+    const requestedSlug = getStoreSlugFromPath();
     if (!requestedSlug) return;
     const matchingBusiness = businesses.find((business) => business.slug === requestedSlug);
     if (matchingBusiness) {
@@ -256,7 +304,7 @@ export default function App() {
     }
     if (!newBusiness.name.trim() || !newBusiness.email.trim() || (!isSupabaseConfigured && newBusiness.password.length < 8)) return;
     setAdminDataError('');
-    const slug = newBusiness.slug.trim() || newBusiness.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const slug = slugify(newBusiness.slug.trim() || newBusiness.name);
     let merchantPasswordHash: string | undefined;
     let createdBusiness: Business = {
       id: `biz-${Date.now()}`,
@@ -322,7 +370,7 @@ export default function App() {
     const updatedBusiness = {
       ...selectedBusiness,
       name: businessForm.name.trim(),
-      slug: businessForm.slug.trim() || businessForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      slug: slugify(businessForm.slug.trim() || businessForm.name),
       whatsapp: businessForm.whatsapp.trim(),
       ownerEmail: isSupabaseConfigured ? selectedBusiness.ownerEmail : businessForm.email.trim(),
       ...(passwordHash ? { merchantPasswordHash: passwordHash } : {}),
@@ -652,7 +700,7 @@ export default function App() {
     if (!client || !isSupabaseConfigured) return;
 
     const loadCatalogData = async () => {
-      const storePath = window.location.pathname.match(/^\/tienda\/([^/]+)\/?$/);
+      const storeSlug = getStoreSlugFromPath();
       let businessQuery = client.from('businesses').select('id,owner_id,name,slug,whatsapp,status,created_at,activated_at,expires_at,initial_products_loaded,grace_days,profiles(email)');
       if (adminLoggedIn) {
       } else if (merchantLoggedIn) {
@@ -662,8 +710,8 @@ export default function App() {
           return;
         }
         businessQuery = businessQuery.eq('owner_id', userData.user.id);
-      } else if (storePath) {
-        businessQuery = businessQuery.eq('slug', decodeURIComponent(storePath[1])).eq('status', 'activo');
+      } else if (storeSlug) {
+        businessQuery = businessQuery.eq('slug', storeSlug).eq('status', 'activo');
       } else if (activePanel === 'catalog') {
         businessQuery = businessQuery.eq('status', 'activo').limit(1);
       } else {
@@ -707,8 +755,9 @@ export default function App() {
           setMerchantAuthError('Esta cuenta no tiene una tienda asignada. Contacta al administrador.');
           return;
         }
-        if (storePath) {
+        if (storeSlug) {
           setRequestedStoreUnavailable(true);
+          setActivePanel('catalog');
           setProducts([]);
         }
         if (activePanel === 'catalog') {
@@ -772,8 +821,8 @@ export default function App() {
         setBusinesses((current) => [...current.filter((business) => !businessIds.includes(business.id)), ...businessesWithCounts]);
       }
       setProducts((current) => adminLoggedIn || merchantLoggedIn ? mappedProducts : [...current.filter((product) => !businessIds.includes(product.businessId)), ...mappedProducts]);
-      if (storePath) {
-        const targetBusiness = mappedBusinesses.find((business) => business.slug === decodeURIComponent(storePath[1]));
+      if (storeSlug) {
+        const targetBusiness = mappedBusinesses.find((business) => business.slug === storeSlug);
         if (targetBusiness) {
           setRequestedStoreUnavailable(false);
           setSelectedBusinessId(targetBusiness.id);
@@ -785,7 +834,7 @@ export default function App() {
       setAdminDataError('');
     };
 
-    void loadCatalogData();
+    void loadCatalogData().finally(() => setStoreLoading(false));
   }, [activePanel, adminLoggedIn, merchantLoggedIn]);
 
   useEffect(() => {
@@ -795,27 +844,72 @@ export default function App() {
     const restoreSession = async () => {
       const { data } = await client.auth.getSession();
       if (!data.session) return;
+      const onStorePage = Boolean(getStoreSlugFromPath());
 
       const { data: profile } = await client
         .from('profiles')
         .select('role')
         .eq('id', data.session.user.id)
-        .single();
+        .maybeSingle();
 
       if (profile?.role === 'admin') {
         setAdminLoggedIn(true);
-        setActivePanel('admin');
+        if (!onStorePage) setActivePanel('admin');
+        return;
+      }
+
+      const { data: ownedBusinesses } = await client
+        .from('businesses')
+        .select('id')
+        .eq('owner_id', data.session.user.id)
+        .limit(1);
+      if (ownedBusinesses?.length) {
+        setMerchantLoggedIn(true);
+        if (!onStorePage) setActivePanel('merchant');
       }
     };
 
     void restoreSession();
   }, []);
 
+  const handleLogout = async () => {
+    if (supabase) await supabase.auth.signOut();
+    setAdminLoggedIn(false);
+    setMerchantLoggedIn(false);
+    setAdminForm((current) => ({ ...current, password: '' }));
+    setMerchantForm({ email: '', password: '' });
+    setAuthError('');
+    setMerchantAuthError('');
+    setAdminDataError('');
+    setCart({});
+    if (!useLocalDemo) {
+      setBusinesses([]);
+      setProducts([]);
+      setPayments([]);
+      setSelectedBusinessId('');
+    }
+    setActivePanel('home');
+  };
+
+  const goToPanel = (panel: Panel) => {
+    setActivePanel(panel);
+    setMobileMenuOpen(false);
+    if (window.location.pathname !== '/') window.history.pushState({}, '', '/');
+  };
+
+  useEffect(() => {
+    // Cada tienda tiene su propio carrito: al cambiar de tienda se vacía.
+    setCart({});
+    setCatalogSearch('');
+    setCatalogFilter('Todos');
+  }, [selectedBusinessId]);
+
   const handleAdminLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAuthError('');
 
-    if (useLocalDemo && adminForm.password === 'Propaul1') {
+    const demoAdminPassword = import.meta.env.VITE_DEMO_ADMIN_PASSWORD as string | undefined;
+    if (useLocalDemo && demoAdminPassword && adminForm.password === demoAdminPassword) {
       setAdminLoggedIn(true);
       setActivePanel('admin');
       return;
@@ -903,30 +997,78 @@ export default function App() {
               <Store className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Catálogo Fácil</p>
               <h1 className="text-lg font-semibold text-slate-900">Catálogo Fácil</h1>
+              <p className="text-xs text-slate-500">Catálogos para comercios locales</p>
             </div>
           </div>
 
           <nav className="hidden items-center gap-6 md:flex">
-            <button className={activePanel === 'home' ? 'text-slate-900' : 'text-slate-600'} onClick={() => setActivePanel('home')}>Inicio</button>
-            <button className={activePanel === 'catalog' ? 'text-slate-900' : 'text-slate-600'} onClick={() => setActivePanel('catalog')}>Catálogo</button>
-            <button className={activePanel === 'admin' ? 'text-slate-900' : 'text-slate-600'} onClick={() => setActivePanel('admin')}>Panel maestro</button>
-            <button className={activePanel === 'merchant' ? 'text-slate-900' : 'text-slate-600'} onClick={() => setActivePanel('merchant')}>Comerciante</button>
+            <button className={activePanel === 'home' ? 'font-semibold text-slate-900' : 'text-slate-600'} onClick={() => goToPanel('home')}>Inicio</button>
+            <button className={activePanel === 'catalog' ? 'font-semibold text-slate-900' : 'text-slate-600'} onClick={() => goToPanel('catalog')}>Catálogo</button>
+            <button className={activePanel === 'admin' ? 'font-semibold text-slate-900' : 'text-slate-600'} onClick={() => goToPanel('admin')}>Panel maestro</button>
+            <button className={activePanel === 'merchant' ? 'font-semibold text-slate-900' : 'text-slate-600'} onClick={() => goToPanel('merchant')}>Comerciante</button>
           </nav>
 
           <div className="flex items-center gap-3">
-            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 sm:inline-flex">
-              {getSupabaseStatusMessage()}
-            </span>
+            {!isSupabaseConfigured && import.meta.env.DEV && (
+              <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 sm:inline-flex">
+                {getSupabaseStatusMessage()}
+              </span>
+            )}
+            {adminLoggedIn || merchantLoggedIn ? (
+              <>
+                <button
+                  className="hidden rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 sm:inline-flex"
+                  onClick={() => goToPanel(adminLoggedIn ? 'admin' : 'merchant')}
+                >
+                  Dashboard
+                </button>
+                <button
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  onClick={() => void handleLogout()}
+                >
+                  Cerrar sesión
+                </button>
+              </>
+            ) : (
+              <button
+                className="hidden rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 sm:inline-flex"
+                onClick={() => goToPanel('merchant')}
+              >
+                Acceder
+              </button>
+            )}
             <button
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
-              onClick={() => setActivePanel(adminLoggedIn ? 'admin' : 'home')}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 md:hidden"
+              aria-label="Abrir menú"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((open) => !open)}
             >
-              {adminLoggedIn ? 'Dashboard' : 'Acceder'}
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
           </div>
         </div>
+
+        {mobileMenuOpen && (
+          <nav className="border-t border-slate-200 bg-white px-4 py-3 md:hidden">
+            <div className="mx-auto flex max-w-7xl flex-col gap-1">
+              {([
+                ['home', 'Inicio'],
+                ['catalog', 'Catálogo'],
+                ['admin', 'Panel maestro'],
+                ['merchant', 'Comerciante'],
+              ] as const).map(([panel, label]) => (
+                <button
+                  key={panel}
+                  className={`rounded-lg px-3 py-2.5 text-left text-sm ${activePanel === panel ? 'bg-slate-100 font-semibold text-slate-900' : 'text-slate-600'}`}
+                  onClick={() => goToPanel(panel)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
       </header>
 
       {activePanel === 'home' && (
@@ -935,7 +1077,7 @@ export default function App() {
             <div className="space-y-6">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.22em] text-emerald-100">
                 <Sparkles className="h-3.5 w-3.5" />
-                Platforma real para comercios pequeños
+                Plataforma real para comercios pequeños
               </div>
               <div className="space-y-4">
                 <h2 className="max-w-xl text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -1066,7 +1208,7 @@ export default function App() {
                 {authError && <p className="mt-3 text-sm text-rose-600">{authError}</p>}
               </form>
               <p className="mt-4 text-xs leading-6 text-slate-500">
-                Acceso local de respaldo: la contraseña maestra es Propaul1. Cuando la URL real de Supabase esté configurada, el sistema usará autenticación real con perfiles y permisos.
+                Acceso exclusivo para el administrador de Catálogo Fácil.
               </p>
             </section>
           ) : (
@@ -1256,7 +1398,7 @@ export default function App() {
                   <div className="space-y-3">
                     {products.filter((product) => product.businessId === selectedBusinessId).map((product) => (
                       <article key={product.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center">
-                        <img src={product.image} alt="" className="h-16 w-16 rounded-xl bg-white object-cover" />
+                        <ProductImage src={product.image} alt={product.name} className="h-16 w-16 rounded-xl bg-white object-cover" />
                         <div className="min-w-0 flex-1">
                           <h4 className="truncate font-semibold text-slate-900">{product.name}</h4>
                           <p className="text-xs text-slate-500">{product.category} · {formatMoney(product.price)}</p>
@@ -1384,7 +1526,7 @@ export default function App() {
                   .map((product) => (
                     <div key={product.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-4">
-                        <img src={product.image} alt={product.name} className="h-16 w-16 rounded-xl object-cover" />
+                        <ProductImage src={product.image} alt={product.name} className="h-16 w-16 rounded-xl object-cover" />
                         <div>
                           <p className="font-semibold text-slate-900">{product.name}</p>
                           <p className="text-xs text-slate-500">{product.category} · {formatMoney(product.price)}</p>
@@ -1516,7 +1658,11 @@ export default function App() {
 
       {activePanel === 'catalog' && (
         <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-          {requestedStoreUnavailable ? (
+          {storeLoading ? (
+            <section className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center text-slate-600" role="status">
+              Cargando catálogo…
+            </section>
+          ) : requestedStoreUnavailable || (!useLocalDemo && !selectedBusiness.id) ? (
             <section className="mx-auto max-w-2xl rounded-2xl border border-amber-300 bg-amber-50 px-6 py-8 text-center text-amber-950" role="status">
               <h2 className="text-2xl font-semibold">Tienda no disponible</h2>
               <p className="mt-2 text-sm">Este catálogo está inactivo o no existe. Contacta al administrador de la tienda.</p>
@@ -1535,8 +1681,8 @@ export default function App() {
                 <input
                   className="w-56 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   placeholder="Buscar producto"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  value={catalogSearch}
+                  onChange={(event) => setCatalogSearch(event.target.value)}
                 />
               </div>
             </div>
@@ -1562,10 +1708,10 @@ export default function App() {
 
           <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {publicProducts.filter((product) => product.name.toLowerCase().includes(search.toLowerCase())).map((product) => (
+              {publicProducts.filter((product) => product.name.toLowerCase().includes(catalogSearch.toLowerCase())).map((product) => (
                 <article key={product.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <div className="relative">
-                    <img src={product.image} alt={product.name} className="h-52 w-full object-cover" />
+                    <ProductImage src={product.image} alt={product.name} className="h-52 w-full object-cover" />
                     <span className="absolute left-4 top-4 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-700">
                       {product.category}
                     </span>
@@ -1628,14 +1774,11 @@ export default function App() {
                   <span>Subtotal</span>
                   <span>{formatMoney(totalCart)}</span>
                 </div>
-                <div className="flex items-center justify-between text-sm text-slate-600">
-                  <span>Envío</span>
-                  <span>{totalCart > 0 ? formatMoney(12) : formatMoney(0)}</span>
-                </div>
                 <div className="flex items-center justify-between text-base font-semibold text-slate-900">
                   <span>Total</span>
-                  <span>{formatMoney(totalCart + (totalCart > 0 ? 12 : 0))}</span>
+                  <span>{formatMoney(totalCart)}</span>
                 </div>
+                <p className="text-xs text-slate-500">El envío y la entrega se coordinan con la tienda por WhatsApp.</p>
                 <button className="flex w-full items-center justify-between rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white" onClick={handleCatalogCheckout}>
                   Enviar pedido por WhatsApp
                   <ArrowRight className="h-4 w-4" />
