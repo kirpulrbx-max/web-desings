@@ -1,15 +1,40 @@
 @import 'tailwindcss';
 
+@theme {
+  --font-sans: 'Plus Jakarta Sans', Inter, 'Segoe UI', system-ui, sans-serif;
+  --color-ink-950: #0b1210;
+  --color-ink-900: #121c19;
+  --color-ink-700: #33403c;
+  --color-ink-500: #66736f;
+  --color-ink-400: #8b9692;
+  --color-ink-200: #dfe4e1;
+  --color-ink-100: #edf0ee;
+  --color-ink-50: #f6f7f5;
+  --color-brand-50: #ecfdf3;
+  --color-brand-100: #d1fae1;
+  --color-brand-200: #a6f2c6;
+  --color-brand-500: #16a35f;
+  --color-brand-600: #0e8a4f;
+  --color-brand-700: #0b6e40;
+  --color-brand-900: #063a23;
+  --color-accent-400: #ffb547;
+  --color-accent-500: #f59e0b;
+  --radius-card: 1.25rem;
+  --shadow-soft: 0 1px 2px rgb(16 24 20 / 0.04), 0 8px 24px -12px rgb(16 24 20 / 0.12);
+  --shadow-lift: 0 2px 4px rgb(16 24 20 / 0.06), 0 24px 48px -16px rgb(16 24 20 / 0.22);
+}
+
 :root {
-  font-family: Inter, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
-  color: #0f172a;
-  background: #f8fafc;
+  color: var(--color-ink-900);
+  background: var(--color-ink-50);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html {
@@ -20,18 +45,61 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
+}
+
+/* En iOS un input con menos de 16 px hace zoom al enfocarlo. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+}
+
 img {
   display: block;
   max-width: 100%;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-sheet { animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-fade { animation: fade-in 0.18s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet, .animate-fade { animation: none; }
+  html { scroll-behavior: auto; }
 }
