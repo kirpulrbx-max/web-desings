@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { businesses as businessSeed, initialProducts, payments as paymentSeed, type Business, type BusinessStatus, type Payment, type Product } from '../data/mock';
+import { findExampleStore, getExampleSlugFromPath } from '../data/examples';
 import { buildWhatsAppLink, buildWhatsAppMessage, parsePrice, slugify, todayIso } from '../lib/format';
 import { prepareProductImage, readFileAsDataUrl } from '../lib/image';
 import { deleteProductImage, uploadProductImage } from '../lib/storage';
@@ -130,13 +131,21 @@ const getFunctionErrorMessage = async (error: { message?: string; context?: unkn
 
 const notConfiguredMessage = 'No se puede guardar: configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel y vuelve a desplegar.';
 
+const isStorefrontPath = () => Boolean(getStoreSlugFromPath() || getExampleSlugFromPath());
+
 export function useCatalogApp() {
-  const [activePanel, setActivePanel] = useState<Panel>(() => (getStoreSlugFromPath() ? 'catalog' : 'home'));
+  // Tienda de ejemplo (/ejemplo/<slug>): datos fijos en el código, sin Supabase.
+  const [example] = useState(() => findExampleStore(getExampleSlugFromPath()));
+  const [activePanel, setActivePanel] = useState<Panel>(() => (isStorefrontPath() ? 'catalog' : 'home'));
   const [storeLoading, setStoreLoading] = useState(() => Boolean(getStoreSlugFromPath()) && isSupabaseConfigured);
-  const [businesses, setBusinesses] = useState<Business[]>(() => (useLocalDemo ? readStorage(businessesStorageKey, businessSeed) : []));
-  const [products, setProducts] = useState<Product[]>(() => (useLocalDemo ? readStorage(productsStorageKey, initialProducts) : []));
+  const [businesses, setBusinesses] = useState<Business[]>(() =>
+    example ? [example.business] : useLocalDemo ? readStorage(businessesStorageKey, businessSeed) : [],
+  );
+  const [products, setProducts] = useState<Product[]>(() =>
+    example ? example.products : useLocalDemo ? readStorage(productsStorageKey, initialProducts) : [],
+  );
   const [payments, setPayments] = useState<Payment[]>(() => (useLocalDemo ? paymentSeed : []));
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>(useLocalDemo ? businessSeed[0].id : '');
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>(example ? example.business.id : useLocalDemo ? businessSeed[0].id : '');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [merchantLoggedIn, setMerchantLoggedIn] = useState(false);
@@ -703,11 +712,11 @@ export function useCatalogApp() {
   /* ------------------------------ Efectos ------------------------------ */
 
   useEffect(() => {
-    if (useLocalDemo) writeStorage(businessesStorageKey, businesses);
+    if (useLocalDemo && !example) writeStorage(businessesStorageKey, businesses);
   }, [businesses]);
 
   useEffect(() => {
-    if (useLocalDemo) writeStorage(productsStorageKey, products);
+    if (useLocalDemo && !example) writeStorage(productsStorageKey, products);
   }, [products]);
 
   useEffect(() => {
@@ -726,7 +735,7 @@ export function useCatalogApp() {
   }, [selectedBusinessId]);
 
   useEffect(() => {
-    const onPopState = () => setActivePanel(getStoreSlugFromPath() ? 'catalog' : 'home');
+    const onPopState = () => setActivePanel(isStorefrontPath() ? 'catalog' : 'home');
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -737,6 +746,7 @@ export function useCatalogApp() {
     let cancelled = false;
 
     const loadCatalogData = async () => {
+      if (getExampleSlugFromPath() && activePanel === 'catalog') return;
       const storeSlug = getStoreSlugFromPath();
       const isPrivate = adminLoggedIn || merchantLoggedIn;
       // El correo del dueño solo se pide en paneles privados (nunca en la tienda pública).
@@ -889,7 +899,7 @@ export function useCatalogApp() {
     const restoreSession = async () => {
       const { data } = await client.auth.getSession();
       if (!data.session) return;
-      const onStorePage = Boolean(getStoreSlugFromPath());
+      const onStorePage = isStorefrontPath();
       const { data: profile } = await client.from('profiles').select('role').eq('id', data.session.user.id).maybeSingle();
       if (profile?.role === 'admin') {
         setAdminLoggedIn(true);
@@ -908,6 +918,7 @@ export function useCatalogApp() {
   return {
     // estado
     activePanel,
+    example,
     storeLoading,
     businesses,
     payments,

@@ -1,5 +1,7 @@
 import { ArrowRight, Check, ImagePlus, MessageCircle, QrCode, Smartphone, Store } from 'lucide-react';
+import { exampleStores } from '../data/examples';
 import type { CatalogApp } from '../hooks/useCatalogApp';
+import { formatMoney } from '../lib/format';
 import { Button, Card } from '../components/ui';
 
 const steps = [
@@ -78,8 +80,8 @@ export function HomeView({ app }: { app: CatalogApp }) {
               Muestra tus productos con fotos y precios, comparte un código QR y recibe los pedidos directo en tu WhatsApp. Sin comisiones por venta.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button size="lg" onClick={() => app.goToPanel('catalog')}>
-                Ver tienda de ejemplo <ArrowRight className="h-4 w-4" />
+              <Button size="lg" onClick={() => document.getElementById('ejemplos')?.scrollIntoView({ behavior: 'smooth' })}>
+                Ver tiendas de ejemplo <ArrowRight className="h-4 w-4" />
               </Button>
               <Button size="lg" variant="secondary" onClick={() => app.goToPanel('merchant')}>
                 Entrar a mi tienda
@@ -94,6 +96,41 @@ export function HomeView({ app }: { app: CatalogApp }) {
             </ul>
           </div>
           <PhoneMockup />
+        </div>
+      </section>
+
+      <section id="ejemplos" className="mx-auto max-w-7xl scroll-mt-20 px-4 pb-16 sm:px-6 lg:px-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Ejemplos</p>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900 sm:text-3xl">Mira cómo puede verse tu negocio</h2>
+        <p className="mt-2 max-w-xl text-ink-500">Cada tienda tiene sus colores. Ábrelas, añade productos al carrito y mira cómo llega el pedido.</p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {exampleStores.map(({ business, products, theme, summary, emoji }) => (
+            <a
+              key={business.id}
+              href={`/ejemplo/${business.slug}`}
+              className="group flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-ink-200/70 bg-white shadow-[var(--shadow-soft)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)]"
+            >
+              <div className="relative px-5 pb-12 pt-5 text-white" style={{ background: `linear-gradient(160deg, ${theme.primary}, ${theme.primaryDark})` }}>
+                <span className="text-3xl" aria-hidden>{emoji}</span>
+                <p className="mt-2 text-lg font-extrabold leading-tight" style={{ fontFamily: theme.headingFont }}>{business.name}</p>
+                <p className="text-xs" style={{ color: theme.onPrimaryMuted }}>{theme.tagline}</p>
+              </div>
+              <div className="relative -mt-8 grid grid-cols-3 gap-2 px-4">
+                {products.slice(0, 3).map((product) => (
+                  <div key={product.id} className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200/60">
+                    <img src={product.image} alt="" className="aspect-square w-full" />
+                    <p className="truncate px-1.5 py-1 text-[10px] font-bold text-ink-900">{formatMoney(product.price)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-1 flex-col p-5 pt-3">
+                <p className="text-sm text-ink-500">{summary}</p>
+                <span className="mt-auto flex items-center gap-1.5 pt-4 text-sm font-semibold" style={{ color: theme.primary }}>
+                  Abrir ejemplo <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+                </span>
+              </div>
+            </a>
+          ))}
         </div>
       </section>
 

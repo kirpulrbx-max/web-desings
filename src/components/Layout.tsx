@@ -1,5 +1,6 @@
 import { LogOut, Menu, ShoppingBag, X } from 'lucide-react';
 import { useState } from 'react';
+import { getExampleSlugFromPath } from '../data/examples';
 import { getStoreSlugFromPath, type CatalogApp, type Panel } from '../hooks/useCatalogApp';
 import { getSupabaseStatusMessage, isSupabaseConfigured } from '../lib/supabase';
 import { Button, IconButton, cx } from './ui';
@@ -10,14 +11,14 @@ export function Logo({ compact = false }: { compact?: boolean }) {
       <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
         <ShoppingBag className="h-[18px] w-[18px]" />
       </span>
-      {!compact && <span className="text-base font-extrabold tracking-tight text-ink-900">Catálogo Fácil</span>}
+      {!compact && <span className="whitespace-nowrap text-base font-extrabold tracking-tight text-ink-900">Catálogo Fácil</span>}
     </span>
   );
 }
 
-const navItems: Array<[Panel, string]> = [
+const navItems: Array<[Panel | 'ejemplos', string]> = [
   ['home', 'Inicio'],
-  ['catalog', 'Ver demo'],
+  ['ejemplos', 'Ejemplos'],
   ['merchant', 'Mi tienda'],
   ['admin', 'Administración'],
 ];
@@ -26,10 +27,15 @@ export function Header({ app }: { app: CatalogApp }) {
   const [open, setOpen] = useState(false);
   const loggedIn = app.adminLoggedIn || app.merchantLoggedIn;
   // En la tienda pública los clientes solo ven una barra mínima, sin enlaces de administración.
-  const storefront = app.activePanel === 'catalog' && Boolean(getStoreSlugFromPath()) && !loggedIn;
-  const go = (panel: Panel) => {
-    app.goToPanel(panel);
+  const storefront = app.activePanel === 'catalog' && Boolean(getStoreSlugFromPath() || getExampleSlugFromPath()) && !loggedIn;
+  const go = (panel: Panel | 'ejemplos') => {
     setOpen(false);
+    if (panel === 'ejemplos') {
+      app.goToPanel('home');
+      window.setTimeout(() => document.getElementById('ejemplos')?.scrollIntoView({ behavior: 'smooth' }), 60);
+      return;
+    }
+    app.goToPanel(panel);
   };
 
   return (
@@ -49,7 +55,7 @@ export function Header({ app }: { app: CatalogApp }) {
               key={panel}
               onClick={() => go(panel)}
               className={cx(
-                'rounded-xl px-3 py-2 text-sm font-medium transition',
+                'whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition',
                 app.activePanel === panel ? 'bg-ink-100 text-ink-900' : 'text-ink-500 hover:text-ink-900',
               )}
             >
@@ -60,8 +66,8 @@ export function Header({ app }: { app: CatalogApp }) {
 
         <div className="flex items-center gap-2">
           {!isSupabaseConfigured && import.meta.env.DEV && (
-            <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200 lg:inline-flex">
-              Modo demo · {getSupabaseStatusMessage()}
+            <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200 xl:inline-flex" title={getSupabaseStatusMessage()}>
+              Modo demo
             </span>
           )}
           {loggedIn ? (

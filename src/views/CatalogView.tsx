@@ -1,8 +1,9 @@
-import { Minus, Plus, Search, ShoppingBag, Store, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowLeft, Minus, Plus, Search, ShoppingBag, Sparkles, Store, Trash2 } from 'lucide-react';
+import { useMemo, useState, type CSSProperties } from 'react';
+import { getExampleTheme, isExampleBusiness } from '../data/examples';
 import type { Product } from '../data/mock';
 import type { CatalogApp } from '../hooks/useCatalogApp';
-import { formatMoney, getInitials } from '../lib/format';
+import { buildWhatsAppMessage, formatMoney, getInitials } from '../lib/format';
 import { Button, Card, EmptyState, ProductImage, Sheet, TextInput, cx } from '../components/ui';
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -39,7 +40,7 @@ function ProductCard({ product, quantity, onAdd, onOpen }: { product: Product; q
       </button>
       <div className="flex flex-1 flex-col p-3">
         <button onClick={onOpen} className="text-left">
-          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-ink-900">{product.name}</h3>
+          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-ink-900" style={{ fontFamily: 'var(--heading-font)' }}>{product.name}</h3>
           {product.description && <p className="mt-0.5 line-clamp-1 text-xs text-ink-500">{product.description}</p>}
         </button>
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
@@ -49,7 +50,7 @@ function ProductCard({ product, quantity, onAdd, onOpen }: { product: Product; q
           ) : (
             <button
               onClick={() => onAdd(1)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink-900 text-white transition hover:bg-brand-600"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white transition hover:bg-brand-700"
               aria-label={`Añadir ${product.name} al pedido`}
             >
               <Plus className="h-4 w-4" />
@@ -62,7 +63,9 @@ function ProductCard({ product, quantity, onAdd, onOpen }: { product: Product; q
 }
 
 function CartContents({ app }: { app: CatalogApp }) {
-  const { cartItems, updateCart, cartTotal, checkoutUrl, clearCart } = app;
+  const { cartItems, updateCart, cartTotal, checkoutUrl, clearCart, selectedBusiness } = app;
+  const [preview, setPreview] = useState(false);
+  const isExample = isExampleBusiness(selectedBusiness.id);
   if (cartItems.length === 0) {
     return <EmptyState icon={<ShoppingBag className="h-6 w-6" />} title="Tu pedido está vacío" description="Toca + en un producto para añadirlo." />;
   }
@@ -88,6 +91,24 @@ function CartContents({ app }: { app: CatalogApp }) {
         <span className="text-xl font-extrabold tabular-nums text-ink-900">{formatMoney(cartTotal)}</span>
       </div>
       <p className="mt-1 text-xs text-ink-500">El pago y la entrega se coordinan con la tienda por WhatsApp.</p>
+      {isExample ? (
+        <>
+          <button
+            onClick={() => setPreview((value) => !value)}
+            className="mt-4 flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-[#1fa855] text-base font-semibold text-white shadow-sm transition hover:bg-[#178a45]"
+          >
+            <WhatsAppIcon className="h-5 w-5" /> {preview ? 'Ocultar mensaje' : 'Ver cómo llega el pedido'}
+          </button>
+          {preview && (
+            <div className="animate-fade mt-3 rounded-2xl bg-[#e7f8df] p-3 text-sm text-ink-900">
+              <p className="mb-1 text-xs font-semibold text-[#178a45]">Mensaje que recibiría la tienda por WhatsApp</p>
+              <p className="whitespace-pre-line">
+                {buildWhatsAppMessage(selectedBusiness.name, cartItems.map(({ name, quantity, price }) => ({ name, quantity, price })))}
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
       <a
         href={checkoutUrl}
         target="_blank"
@@ -96,6 +117,7 @@ function CartContents({ app }: { app: CatalogApp }) {
       >
         <WhatsAppIcon className="h-5 w-5" /> Enviar pedido por WhatsApp
       </a>
+      )}
       <button onClick={clearCart} className="mx-auto mt-3 flex items-center gap-1.5 text-xs font-medium text-ink-500 hover:text-rose-700">
         <Trash2 className="h-3.5 w-3.5" /> Vaciar pedido
       </button>
@@ -145,17 +167,43 @@ export function CatalogView({ app }: { app: CatalogApp }) {
     );
   }
 
+  const theme = getExampleTheme(selectedBusiness.id);
+  const themeStyle = theme
+    ? ({
+        '--color-brand-500': theme.primary,
+        '--color-brand-600': theme.primary,
+        '--color-brand-700': theme.primaryDark,
+        '--color-brand-50': theme.primarySoft,
+        '--color-brand-100': theme.onPrimaryMuted,
+        '--color-ink-50': theme.background,
+        '--heading-font': theme.headingFont ?? 'inherit',
+        backgroundColor: theme.background,
+      } as CSSProperties)
+    : undefined;
+
   return (
-    <main className="pb-28 lg:pb-12">
+    <main className="pb-28 lg:pb-12" style={themeStyle}>
+      {theme && (
+        <div className="bg-ink-900 text-white">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 text-xs sm:px-6 sm:text-sm lg:px-8">
+            <span className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 shrink-0 text-accent-400" /> Tienda de ejemplo: así puede verse la tuya.
+            </span>
+            <a href="/#ejemplos" className="flex shrink-0 items-center gap-1 font-semibold text-accent-400 hover:underline">
+              <ArrowLeft className="h-3.5 w-3.5" /> Ver más
+            </a>
+          </div>
+        </div>
+      )}
       <section className="bg-gradient-to-b from-brand-600 to-brand-700 text-white">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 pb-16 pt-8 sm:px-6 lg:px-8">
-          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white text-xl font-extrabold text-brand-700 shadow-sm">
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white text-xl font-extrabold text-brand-700 shadow-sm" style={{ fontFamily: 'var(--heading-font)' }}>
             {getInitials(selectedBusiness.name)}
           </span>
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-extrabold tracking-tight sm:text-3xl">{selectedBusiness.name}</h1>
+            <h1 className="truncate text-2xl font-extrabold tracking-tight sm:text-3xl" style={{ fontFamily: 'var(--heading-font)' }}>{selectedBusiness.name}</h1>
             <p className="mt-0.5 flex items-center gap-1.5 text-sm text-brand-100">
-              <WhatsAppIcon className="h-4 w-4" /> Haz tu pedido y te atendemos por WhatsApp
+              <WhatsAppIcon className="h-4 w-4 shrink-0" /> {theme?.tagline ?? 'Haz tu pedido y te atendemos por WhatsApp'}
             </p>
           </div>
         </div>
