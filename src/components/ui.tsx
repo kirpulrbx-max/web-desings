@@ -260,10 +260,11 @@ export function Toasts({ toasts }: { toasts: Toast[] }) {
 
 /* ------------------------------- Imágenes ------------------------------ */
 
-export function ProductImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [src]);
-  if (!src || failed) {
+export function ProductImage({ src, alt, className, fallback }: { src: string; alt: string; className?: string; fallback?: string }) {
+  const [failures, setFailures] = useState(0);
+  useEffect(() => setFailures(0), [src]);
+  const current = failures === 0 ? src : failures === 1 ? fallback : '';
+  if (!current) {
     return (
       <div className={cx('flex items-center justify-center bg-gradient-to-br from-ink-100 to-ink-50 text-ink-400', className)} role="img" aria-label={alt}>
         <svg viewBox="0 0 24 24" className="h-1/3 max-h-10 w-1/3 max-w-10" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
@@ -274,5 +275,5 @@ export function ProductImage({ src, alt, className }: { src: string; alt: string
       </div>
     );
   }
-  return <img src={src} alt={alt} className={cx('bg-ink-100 object-cover', className)} loading="lazy" decoding="async" onError={() => setFailed(true)} />;
+  return <img src={current} alt={alt} className={cx('bg-ink-100 object-cover', className)} loading="lazy" decoding="async" onError={() => setFailures((count) => count + 1)} />;
 }

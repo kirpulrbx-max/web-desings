@@ -25,6 +25,8 @@ export type Product = {
   description: string;
   active: boolean;
   image: string;
+  /** Imagen alternativa si la principal no carga (solo en tiendas de ejemplo). */
+  fallbackImage?: string;
 };
 
 export type Payment = {

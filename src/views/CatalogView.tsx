@@ -33,7 +33,7 @@ function ProductCard({ product, quantity, onAdd, onOpen }: { product: Product; q
   return (
     <article className="group flex flex-col overflow-hidden rounded-2xl border border-ink-200/70 bg-white transition hover:shadow-[var(--shadow-soft)]">
       <button onClick={onOpen} className="relative block overflow-hidden" aria-label={`Ver ${product.name}`}>
-        <ProductImage src={product.image} alt={product.name} className="aspect-square w-full transition duration-300 group-hover:scale-[1.03]" />
+        <ProductImage src={product.image} fallback={product.fallbackImage} alt={product.name} className="aspect-square w-full transition duration-300 group-hover:scale-[1.03]" />
         {quantity > 0 && (
           <span className="absolute right-2 top-2 flex h-7 min-w-7 items-center justify-center rounded-full bg-brand-600 px-2 text-xs font-bold text-white shadow">{quantity}</span>
         )}
@@ -74,7 +74,7 @@ function CartContents({ app }: { app: CatalogApp }) {
       <ul className="divide-y divide-ink-100">
         {cartItems.map((item) => (
           <li key={item.id} className="flex items-center gap-3 py-3">
-            <ProductImage src={item.image} alt={item.name} className="h-14 w-14 shrink-0 rounded-xl" />
+            <ProductImage src={item.image} fallback={item.fallbackImage} alt={item.name} className="h-14 w-14 shrink-0 rounded-xl" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-ink-900">{item.name}</p>
               <p className="text-xs text-ink-500">{formatMoney(item.price)} c/u</p>
@@ -188,6 +188,7 @@ export function CatalogView({ app }: { app: CatalogApp }) {
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 text-xs sm:px-6 sm:text-sm lg:px-8">
             <span className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 shrink-0 text-accent-400" /> Tienda de ejemplo: así puede verse la tuya.
+              <span className="hidden text-white/50 sm:inline">Fotos: Unsplash</span>
             </span>
             <a href="/#ejemplos" className="flex shrink-0 items-center gap-1 font-semibold text-accent-400 hover:underline">
               <ArrowLeft className="h-3.5 w-3.5" /> Ver más
@@ -284,7 +285,7 @@ export function CatalogView({ app }: { app: CatalogApp }) {
       <Sheet open={Boolean(detail)} onClose={() => setDetail(null)} eyebrow={detail?.category} title={detail?.name ?? ''}>
         {detail && (
           <div>
-            <ProductImage src={detail.image} alt={detail.name} className="aspect-[4/3] w-full rounded-2xl" />
+            <ProductImage src={detail.image} fallback={detail.fallbackImage} alt={detail.name} className="aspect-[4/3] w-full rounded-2xl" />
             <p className="mt-4 text-2xl font-extrabold text-ink-900">{formatMoney(detail.price)}</p>
             {detail.description && <p className="mt-2 whitespace-pre-line text-sm leading-6 text-ink-700">{detail.description}</p>}
             <div className="mt-6 flex items-center gap-3">
