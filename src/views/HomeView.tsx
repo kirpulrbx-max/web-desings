@@ -118,7 +118,15 @@ export function HomeView({ app }: { app: CatalogApp }) {
               <div className="relative -mt-8 grid grid-cols-3 gap-2 px-4">
                 {products.slice(0, 3).map((product) => (
                   <div key={product.id} className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200/60">
-                    <img src={product.image} alt="" className="aspect-square w-full" />
+                    <img
+                      src={product.image}
+                      alt=""
+                      loading="lazy"
+                      className="aspect-square w-full object-cover"
+                      onError={(event) => {
+                        if (product.fallbackImage && event.currentTarget.src !== product.fallbackImage) event.currentTarget.src = product.fallbackImage;
+                      }}
+                    />
                     <p className="truncate px-1.5 py-1 text-[10px] font-bold text-ink-900">{formatMoney(product.price)}</p>
                   </div>
                 ))}
