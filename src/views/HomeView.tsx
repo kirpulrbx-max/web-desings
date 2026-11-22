@@ -168,7 +168,7 @@ export function HomeView({ app }: { app: CatalogApp }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10">
-              <p className="text-3xl font-extrabold">$30</p>
+              <p className="text-3xl font-extrabold">$20</p>
               <p className="text-sm text-ink-200">Creación de la tienda</p>
             </div>
             <div className="rounded-2xl bg-brand-600 p-5">
